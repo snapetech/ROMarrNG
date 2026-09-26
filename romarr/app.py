@@ -5638,7 +5638,7 @@ def make_handler(service: ROMarrNG):
                 service.auth.totp = _Totp(secret=secret, backup=codes)
                 return self._json(200, {
                     "secret": secret,
-                    "uri": provisioning_uri(secret, account="romarr"),
+                    "uri": provisioning_uri(secret, account="romarrng"),
                     "backup_codes": codes,
                     "note": "Scan the URI or enter the secret in any TOTP "
                             "app. Codes are asked for at sign-in from now "

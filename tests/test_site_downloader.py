@@ -311,7 +311,7 @@ def test_we_say_who_we_are(tmp_path):
     client.add("https://example.invalid/rom.zip")
     client.completed()
     agents = {c.get("headers", {}).get("User-Agent") for c in session.calls}
-    assert agents == {"ROMarr (+https://github.com/BlizzHacker/romarr)"}
+    assert agents == {"ROMarrNG (+https://github.com/snapetech/ROMarrNG)"}
 
 
 # --- the browser lane -------------------------------------------------------

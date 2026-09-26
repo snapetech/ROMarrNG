@@ -58,7 +58,7 @@ def code_at(secret: str, moment: int, *, step: int = STEP_SECONDS,
     return str(value % (10 ** digits)).zfill(digits)
 
 
-def provisioning_uri(secret: str, *, account: str, issuer: str = "ROMarr") -> str:
+def provisioning_uri(secret: str, *, account: str, issuer: str = "ROMarrNG") -> str:
     """The `otpauth://` URI an authenticator scans."""
     label = quote(f"{issuer}:{account}", safe="")
     return (f"otpauth://totp/{label}?secret={secret}"

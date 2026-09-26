@@ -1,8 +1,8 @@
-"""The projects ROMarr stands on, in one place.
+"""The projects ROMarrNG stands on, in one place.
 
-ROMarr acquires ROMs and files them. It does not store a library, serve a
+ROMarrNG acquires ROMs and files them. It does not store a library, serve a
 player, publish a DAT, index a tracker, or run a download -- every one of
-those is somebody else's work, and without them there is nothing for ROMarr
+those is somebody else's work, and without them there is nothing for ROMarrNG
 to automate. This module is the credit made concrete: each entry carries the
 project's own repository and site, a one-line description in its authors'
 terms, and -- where the project ships one -- the command that installs it,
@@ -11,7 +11,7 @@ so the respect is also a convenience.
 Categories order the way a person actually assembles the stack: the library
 server first, then what plays from it, what finds and fetches ROMs, the
 databases that make verification possible, and the launchers a folder
-library feeds. `ROLE_ROMARR` marks where ROMarr itself sits, so the app can
+library feeds. `ROLE_ROMARR` marks where ROMarrNG itself sits, so the app can
 render "you are here" honestly rather than implying it is the center.
 
 Nothing here is a hard dependency the code imports; it is documentation with
@@ -33,7 +33,7 @@ class Project:
     #: A copy-pasteable install line, when the project ships one. Empty when
     #: install is genuinely project-specific -- better silent than wrong.
     install: str = ""
-    #: True for ROMarr's own row, so the UI can mark it without string-matching.
+    #: True for ROMarrNG's own row, so the UI can mark it without string-matching.
     is_self: bool = False
 
 
@@ -147,10 +147,10 @@ ECOSYSTEM: dict[str, list[Project]] = {
     ],
     "Acquisition — finding and fetching ROMs": [
         Project(
-            "ROMarr",
-            "The *arr for games -- request it, ROMarr finds it and files it.",
-            repo="https://github.com/BlizzHacker/romarr",
-            install="docker pull ghcr.io/blizzhacker/romarr:latest",
+            "ROMarrNG",
+            "The *arr for games -- ROMarrNG acquires ROMs, tracks SeerrNG requests, and streams verified imports.",
+            repo="https://github.com/snapetech/ROMarrNG",
+            install="docker pull ghcr.io/snapetech/romarrng:latest",
             is_self=True),
         Project(
             "GG Requestz",
@@ -165,19 +165,19 @@ ECOSYSTEM: dict[str, list[Project]] = {
             site="https://prowlarr.com"),
         Project(
             "qBittorrent",
-            "A free and reliable BitTorrent client, the one ROMarr defaults to.",
+            "A free and reliable BitTorrent client, the one ROMarrNG defaults to.",
             repo="https://github.com/qbittorrent/qBittorrent",
             site="https://www.qbittorrent.org"),
         Project(
             "ROM Hub",
-            "ROMarr's plugin factory -- where a source is written, run and "
+            "ROMarrNG's plugin factory -- where a source is written, run and "
             "sandboxed.",
             repo="https://github.com/BlizzHacker/rom-hub"),
     ],
     "Preservation databases — what makes verification real": [
         Project(
             "No-Intro",
-            "The reference database of cartridge dumps -- ROMarr verifies "
+            "The reference database of cartridge dumps -- ROMarrNG verifies "
             "against its DATs.",
             site="https://no-intro.org"),
         Project(

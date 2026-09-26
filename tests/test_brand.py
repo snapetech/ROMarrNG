@@ -1,4 +1,4 @@
-"""The product is spelled ROMarr. This is the guard that proves it.
+"""The product is spelled ROMarrNG. This is the guard that proves it.
 
 The brand has now been got wrong twice in the same place, both times invisibly to
 `grep`, because the logo is split across an element boundary so that "arr" can
@@ -19,7 +19,7 @@ brand, and changing them breaks existing installs:
   * `ROMARR_DATA` / `ROMARR_PORT`
   * `/opt/romarr`, `romarr.service`, `romarr.json`
   * the default download category `romarr`
-  * the image name `ghcr.io/blizzhacker/romarr` (OCI requires lowercase)
+  * the image name `ghcr.io/snapetech/romarrng` (OCI requires lowercase)
 """
 
 import io
@@ -29,7 +29,7 @@ import re
 from romarr.app import ROMarr, VERSION
 from romarr.ui import page
 
-BRAND = "ROMarr"
+BRAND = "ROMarrNG"
 
 # Every spelling that has ever been wrong, as a whole word. `Romarr` was the
 # spelling before this rebrand; `Rommarr` was the one before that.
@@ -56,7 +56,7 @@ def _text(html: str) -> str:
     return re.sub(r"<[^>]+>", "", html)
 
 
-def test_the_rendered_brand_is_exactly_romarr():
+def test_the_rendered_brand_is_exactly_romarrng():
     brand = re.search(r'<div id="brand">(.*?)</div>', page(), re.S)
     assert brand, "the page no longer has a brand element"
     assert _text(brand.group(1)).strip() == BRAND

@@ -10,19 +10,12 @@ def _text(html: str) -> str:
     return re.sub(r"<[^>]+>", "", html)
 
 
-def test_the_brand_reads_romarr():
-    """The brand is split across an element boundary so "arr" can carry the
-    accent colour: `Rom<span>arr</span>`. That is exactly why the rename from
-    Rommarr missed it, and why grepping the source for the old name finds
-    nothing -- neither half contains it, only the rendering does.
-
-    So this asserts on rendered text. A test against the source would have
-    passed on the broken version.
-    """
+def test_the_brand_reads_romarrng():
+    """Check the displayed word, since its accent styling splits the markup."""
     html = page()
     brand = re.search(r'<div id="brand">(.*?)</div>', html, re.S)
     assert brand, "the page no longer has a brand element"
-    assert _text(brand.group(1)).strip() == "ROMarr"
+    assert _text(brand.group(1)).strip() == "ROMarrNG"
 
 
 def test_the_old_name_appears_nowhere_a_user_can_read_it():
@@ -30,7 +23,7 @@ def test_the_old_name_appears_nowhere_a_user_can_read_it():
 
 
 def test_the_document_title_is_the_product_name():
-    assert re.search(r"<title>ROMarr</title>", page())
+    assert re.search(r"<title>ROMarrNG</title>", page())
 
 
 def test_the_libraries_page_is_in_the_nav_and_rendered():

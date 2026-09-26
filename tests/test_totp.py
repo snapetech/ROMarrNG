@@ -44,15 +44,15 @@ def test_a_secret_is_base32_and_long_enough():
 
 
 def test_the_provisioning_uri_is_what_an_authenticator_expects():
-    uri = provisioning_uri("GEZDGNBVGY3TQOJQ", account="wade", issuer="ROMarr")
+    uri = provisioning_uri("GEZDGNBVGY3TQOJQ", account="wade", issuer="ROMarrNG")
     assert uri.startswith("otpauth://totp/")
-    assert "ROMarr" in uri and "wade" in uri
+    assert "ROMarrNG" in uri and "wade" in uri
     assert "secret=GEZDGNBVGY3TQOJQ" in uri
-    assert "issuer=ROMarr" in uri
+    assert "issuer=ROMarrNG" in uri
 
 
 def test_the_provisioning_uri_escapes_an_account_with_a_space():
-    uri = provisioning_uri("AAAA", account="wade ivy", issuer="ROMarr")
+    uri = provisioning_uri("AAAA", account="wade ivy", issuer="ROMarrNG")
     assert " " not in uri
 
 

@@ -319,6 +319,28 @@ def served_routes(source: str | None = None) -> set[str]:
     # exactly that with /api/v1/webhook.
     for group in re.findall(r'route\.path in \(([^)]*)\)', source):
         found.update(re.findall(r'"(/[^"]*)"', group))
+    # The authenticated SeerrNG endpoints take opaque request and asset IDs,
+    # so the handler matches their path segments rather than comparing one
+    # literal route.path string. Keep these templates tied to the segment
+    # checks in app.py so the spec drift test can see routes with variables.
+    prefix = (r'parts\[1:5\]\s*==\s*\["api",\s*"v1",\s*'
+              r'"integration",\s*"requests"\]')
+    variable_routes = (
+        (r'len\(parts\)\s*==\s*6\s*and\s*' + prefix,
+         "/api/v1/integration/requests/{requestId}"),
+        (r'len\(parts\)\s*==\s*7\s*and\s*' + prefix
+         + r'[\s\S]{0,160}parts\[6\]\s*==\s*"retry"',
+         "/api/v1/integration/requests/{requestId}/retry"),
+        (r'len\(parts\)\s*==\s*7\s*and\s*' + prefix
+         + r'[\s\S]{0,160}parts\[6\]\s*==\s*"assets"',
+         "/api/v1/integration/requests/{requestId}/assets"),
+        (r'len\(parts\)\s*==\s*8\s*and\s*' + prefix
+         + r'[\s\S]{0,160}parts\[6\]\s*==\s*"assets"',
+         "/api/v1/integration/requests/{requestId}/assets/{assetId}"),
+    )
+    for evidence, template in variable_routes:
+        if re.search(evidence, source):
+            found.add(template)
     return found
 
 

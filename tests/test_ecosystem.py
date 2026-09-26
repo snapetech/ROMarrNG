@@ -21,10 +21,10 @@ def test_the_upstreams_that_made_this_possible_are_all_present():
         assert essential in names, f"{essential} missing from the credits"
 
 
-def test_romarr_marks_itself_and_only_itself():
+def test_romarrng_marks_itself_and_only_itself():
     selves = [p for p in all_projects() if p.is_self]
     assert len(selves) == 1
-    assert selves[0].name == "ROMarr"
+    assert selves[0].name == "ROMarrNG"
 
 
 #: Every package manager an entry here is allowed to install from.
