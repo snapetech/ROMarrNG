@@ -45,6 +45,9 @@ The fork-specific contract is documented in
 [docs/SEERRNG-INTEGRATION.md](docs/SEERRNG-INTEGRATION.md). Use the ROMarrNG
 repository, image, or source when following this guide; upstream ROMarr does
 not provide the external request and asset endpoints described there.
+The authenticated `/api/platforms` directory also returns platform aliases so
+SeerrNG can map IGDB names to ROMarrNG's stable import slugs before applying
+its configurable Retro and Modern groups.
 
 ---
 

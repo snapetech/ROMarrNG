@@ -2859,6 +2859,7 @@ class ROMarrNG:
             out.append({
                 "slug": platform.slug,
                 "name": platform.name,
+                "aliases": list(platform.aliases),
                 "media": platform.media,
                 "extensions": list(platform.extensions),
                 "max_size_mb": platform.max_size // (1024 * 1024),

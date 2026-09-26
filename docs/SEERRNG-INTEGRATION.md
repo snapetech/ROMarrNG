@@ -15,6 +15,15 @@ ROMarrNG API key in a browser response.
 version, and `apiVersion`. SeerrNG must stop integration when it does not
 support the returned contract version.
 
+## Supported emulation systems
+
+`GET /api/platforms` is the authoritative list of systems ROMarrNG can import.
+Each entry includes its stable ROMarr slug, display name, matching aliases,
+and media details. SeerrNG assigns the Retro or Modern group to each slug and
+uses the aliases to connect QuestarrNG's IGDB platform names to ROMarrNG's
+request platform. A system without a SeerrNG group assignment remains hidden
+from user requests.
+
 ## Submit a request
 
 `POST /api/v1/integration/requests`
