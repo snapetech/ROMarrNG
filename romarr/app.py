@@ -1,4 +1,4 @@
-"""ROMarr's HTTP service and web UI.
+"""ROMarrNG's HTTP service and web UI.
 
 Deliberately stdlib-only for the server itself: this runs in a 512MB LXC beside
 a download client and a database, and an *arr that needs a web framework to
@@ -33,15 +33,18 @@ from __future__ import annotations
 
 import json
 import logging
+import mimetypes
 import os
 import pathlib
 import re
+import secrets
+import stat
 import threading
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, unquote_plus, urlparse
+from urllib.parse import parse_qs, quote, unquote_plus, urlparse
 
 import time
 
@@ -106,7 +109,13 @@ log = logging.getLogger(__name__)
 
 VERSION = "0.9.0"
 
-# What ROMarr labels its own downloads with, so its jobs are distinguishable
+INTEGRATION_DISPATCHING = "download handoff is in progress"
+INTEGRATION_DISPATCH_UNCERTAIN = (
+    "Download handoff outcome is uncertain. Check the downloader queue and "
+    "history before retrying; retry only after confirming no matching "
+    "download exists.")
+
+# What ROMarrNG labels its own downloads with, so its jobs are distinguishable
 # from everything else in a shared client -- the same reason Radarr and Sonarr
 # each use a category of their own.
 DEFAULT_CATEGORY = "romarr"
@@ -131,7 +140,7 @@ def category_for(env: dict[str, str], client: str) -> str:
     """The download category for one client, e.g. SABNZBD_CATEGORY.
 
     Configurable per client because the clients are separate installs with
-    separate category lists, and because somebody running two ROMarrs against
+    separate category lists, and because somebody running two ROMarrNGs against
     one SABnzbd needs to tell their downloads apart.
 
     The category does not have to exist in the client beforehand. SABnzbd 5.0.4
@@ -144,7 +153,7 @@ def category_for(env: dict[str, str], client: str) -> str:
     completes and is never imported, with nothing anywhere saying why.
 
     Defining it in SABnzbd is still worth doing if you want the download to land
-    in a folder of its own or run a post-processing script. ROMarr does not need
+    in a folder of its own or run a post-processing script. ROMarrNG does not need
     it either way: it takes the finished path from SABnzbd's own `storage`
     field rather than assuming where the category put it.
     """
@@ -163,7 +172,7 @@ def category_for(env: dict[str, str], client: str) -> str:
 #: Pointed at a real library that is the whole library: on a live install with
 #: ~58 platforms on a network mount the walk had not finished after ten
 #: minutes, so setting DAT_PATH to the obvious place -- the directory the ROMs
-#: and their datfiles are both in -- made ROMarr appear to hang at startup.
+#: and their datfiles are both in -- made ROMarrNG appear to hang at startup.
 #:
 #: DATs sit at the top of a DAT directory, or one level down beside the
 #: platform they describe. Three levels covers both with room to spare, and the
@@ -231,7 +240,7 @@ def _read_failure(err: Exception) -> str:
     """Why a library read failed, in words that suggest a fix.
 
     "HTTPError" tells somebody nothing. A 401 or 403 from a library almost
-    always means the credentials ROMarr holds are wrong or have expired, and
+    always means the credentials ROMarrNG holds are wrong or have expired, and
     saying so is the difference between a five-minute fix and an evening.
     """
     status = getattr(getattr(err, "response", None), "status_code", None)
@@ -264,14 +273,14 @@ def _same_family(a: str, b: str) -> bool:
     return any(a in family and b in family for family in _FAMILIES)
 
 def _archive_tool_path() -> str:
-    """The libarchive bsdtar ROMarr found, or an empty string."""
+    """The libarchive bsdtar ROMarrNG found, or an empty string."""
     try:
         from .library import bsdtar_path
         return bsdtar_path() or ""
     except Exception:  # noqa: BLE001
         return ""
 
-class ROMarr:
+class ROMarrNG:
     """The service. Holds config, clients, and the in-flight queue."""
 
     def __init__(self, env: dict[str, str] | None = None):
@@ -303,7 +312,7 @@ class ROMarr:
             password=e.get("NZBGET_PASS", ""),
             category=category_for(e, "NZBGET"),
         ))
-        # Which game library this ROMarr feeds. RomM remains the default so an
+        # Which game library this ROMarrNG feeds. RomM remains the default so an
         # install that predates the other backends keeps working untouched, and
         # the ROMM_* variables are still honoured for the same reason.
         # NOT self.library: that name is already the ROM directory Path, and
@@ -335,6 +344,8 @@ class ROMarr:
         # carrying Prowlarr's API key.
         self._candidates: dict[str, dict] = {}
         self._lock = threading.Lock()
+        self._external_request_lock = threading.Lock()
+        self._external_request_workers: set[str] = set()
         # Lets a configuration change wake the background refresh instead of
         # waiting out its interval. Created before reload_libraries, which sets
         # it.
@@ -368,7 +379,7 @@ class ROMarr:
         # Wii, Dreamcast, 3DS -- so whether one is configured changes the
         # honest answer to "will this play", and nothing else here.
         #
-        # Optional by design: ROMarr must work identically without it, minus
+        # Optional by design: ROMarrNG must work identically without it, minus
         # the routes only it can offer.
         stream_url = e.get("STREAM_SERVER_URL", "")
         self.store.settings["_stream_url"] = stream_url
@@ -411,7 +422,7 @@ class ROMarr:
         #
         # Turning one off is a real decision rather than a preference: an
         # install whose library server runs with DISABLE_RUFFLE_RS set turns
-        # Ruffle off here so ROMarr stops promising a button that will not be
+        # Ruffle off here so ROMarrNG stops promising a button that will not be
         # there, and an install that would rather its users did not leave for
         # Archive.org turns Emularity off.
         self.players = PlayerPolicy.from_env(e)
@@ -466,7 +477,7 @@ class ROMarr:
 
         # "Claimed" means somebody can actually get in: a password exists, or
         # the operator supplied the key themselves and therefore has it. A key
-        # ROMarr generated for itself is not a credential anybody holds, so an
+        # ROMarrNG generated for itself is not a credential anybody holds, so an
         # install with only that is unclaimed and shows the setup screen.
         #
         # This is the whole of issue #8. Authentication was correct and the
@@ -477,7 +488,7 @@ class ROMarr:
                             or supplied_key)
         if self.auth.enabled and not self.claimed:
             log.warning(
-                "ROMarr is unclaimed: the first visitor to the web UI sets the "
+                "ROMarrNG is unclaimed: the first visitor to the web UI sets the "
                 "password. Set ROMARR_PASSWORD (or ROMARR_API_KEY) in the "
                 "environment to claim it before it starts.")
         self.auth.totp = Totp(
@@ -488,7 +499,7 @@ class ROMarr:
         # Single sign-on, when a proxy in front is the authority.
         #
         # This is what `ROMARR_AUTH=disabled` should have been. That setting
-        # is honest about what it does -- ROMarr stops checking anything, so
+        # is honest about what it does -- ROMarrNG stops checking anything, so
         # any request reaching the port is in, including one that bypassed the
         # proxy entirely. Forward mode keeps the proxy as the authority but
         # verifies the request came *through* it, learns who the user is, and
@@ -553,7 +564,7 @@ class ROMarr:
         # surface two servers talk over.
         from .federation import Federation
         self.federation = Federation(
-            name=e.get("ROMARR_PEER_NAME", "ROMarr"),
+            name=e.get("ROMARR_PEER_NAME", "ROMarrNG"),
             url=e.get("ROMARR_PUBLIC_URL",
                       self.store.settings.get("public_url", "")))
         # Under a leading underscore: peer tokens are credentials, and that
@@ -624,7 +635,7 @@ class ROMarr:
             _hours("list_sync_interval_hours"),
             lambda: self.list_sync()["message"])
         self.scheduler.add(
-            "UpdateCheck", "Check github.com for a newer ROMarr",
+            "UpdateCheck", "Check github.com for a newer ROMarrNG",
             lambda: 86400 if self.store.settings.get("update_check", True) else 0,
             lambda: self.check_update()["message"])
         # Netplay is useless without hashes, and a shelf this size takes
@@ -1088,7 +1099,7 @@ class ROMarr:
                 "platforms": cfg.get("platforms") or [],
                 # Answering and usable are different questions, and conflating
                 # them is how a library with rejected credentials showed as OK
-                # while ROMarr could not read a single game out of it. The
+                # while ROMarrNG could not read a single game out of it. The
                 # heartbeat is deliberately unauthenticated so a slow server
                 # does not stall the page; that makes it a liveness check, not
                 # a verdict on whether the library works.
@@ -1315,7 +1326,7 @@ class ROMarr:
         if not path_ok:
             return {"ok": False, "path_ok": False,
                     "message": f"Connected, but {root} does not exist here. "
-                               "Mount it into ROMarr, or correct the path."}
+                               "Mount it into ROMarrNG, or correct the path."}
         return {"ok": True, "path_ok": True, "message": "Connected"}
 
     # -- operations --------------------------------------------------------
@@ -1443,7 +1454,14 @@ class ROMarr:
                     merged.append(release)
         return merged
 
-    def request(self, game: str, platform_name: str) -> dict:
+    def request(self, game: str, platform_name: str, *,
+                external_request_id: str = "") -> dict:
+        if not external_request_id:
+            external_request_id = self.store.wanted_request_id(
+                game, platform_name)
+        if external_request_id:
+            self.store.update_integration_request(
+                external_request_id, status="searching", detail="")
         platform = resolve(platform_name)
         if platform is None:
             return {"ok": False, "error": f"unknown platform: {platform_name!r}"}
@@ -1453,12 +1471,18 @@ class ROMarr:
                            profile=self.profile, blocklist=self.blocklist)
         if pick is None:
             item = QueueItem(game, platform.slug, "", 0, "failed",
-                             f"no usable release among {len(releases)} result(s)")
+                             f"no usable release among {len(releases)} result(s)",
+                             external_request_id=external_request_id)
             self.store.enqueue(item)
             self.store.want(game, platform.slug)
+            self.store.link_wanted_request(
+                game, platform.slug, external_request_id)
             self.store.note_failure(game, platform.slug, item.detail)
             self.store.record(Event(kind="failed", game=game, platform=platform.slug,
                                     detail=item.detail))
+            if external_request_id:
+                self.store.update_integration_request(
+                    external_request_id, status="failed", detail=item.detail)
             return {"ok": False, "error": item.detail}
 
         if not pick.download_url:
@@ -1470,17 +1494,31 @@ class ROMarr:
                              release_id=release_id(pick),
                              indexer=getattr(pick, "indexer", ""),
                              size=getattr(pick, "size", 0),
-                             release_fault=True)
+                             release_fault=True,
+                             external_request_id=external_request_id)
             self.store.enqueue(item)
             self.store.want(game, platform.slug)
+            self.store.link_wanted_request(
+                game, platform.slug, external_request_id)
             self.store.note_failure(game, platform.slug, item.detail)
             self.store.record(Event(kind="failed", game=game, platform=platform.slug,
                                     release=pick.title, detail=item.detail))
+            if external_request_id:
+                self.store.update_integration_request(
+                    external_request_id, status="failed", detail=item.detail)
             return {"ok": False, "error": item.detail}
 
-        return self.grab(pick, game, platform.slug)
+        outcome = self.grab(pick, game, platform.slug,
+                            external_request_id=external_request_id)
+        if external_request_id:
+            self.store.update_integration_request(
+                external_request_id,
+                status="downloading" if outcome.get("ok") else "failed",
+                detail="" if outcome.get("ok") else str(outcome.get("error") or ""))
+        return outcome
 
-    def grab(self, pick, game: str, platform_slug: str, *, manual: bool = False) -> dict:
+    def grab(self, pick, game: str, platform_slug: str, *, manual: bool = False,
+             external_request_id: str = "") -> dict:
         """Hand one release to a download client and record what happened.
 
         Shared by the automatic path and the Search page, deliberately: a
@@ -1497,9 +1535,12 @@ class ROMarr:
                              f"no download client configured for {pick.protocol}",
                              release_id=release_id(pick),
                              indexer=getattr(pick, "indexer", ""),
-                             size=getattr(pick, "size", 0))
+                             size=getattr(pick, "size", 0),
+                             external_request_id=external_request_id)
             self.store.enqueue(item)
             self.store.want(game, platform_slug)
+            self.store.link_wanted_request(
+                game, platform_slug, external_request_id)
             self.store.note_failure(game, platform_slug, item.detail)
             self.store.record(Event(kind="failed", game=game, platform=platform_slug,
                                     release=pick.title, detail=item.detail))
@@ -1509,6 +1550,14 @@ class ROMarr:
         # it: the import sweep matches a finished download to its queue row by
         # that title, and a file named by the site it came from would never
         # match. See downloaders.hand_off.
+        if external_request_id:
+            # Persist the handoff boundary before contacting another service.
+            # If ROMarrNG stops after the downloader accepts the job but before
+            # the queue row is saved, recovery must not submit it a second time.
+            self.store.update_integration_request(
+                external_request_id,
+                status="downloading",
+                detail=INTEGRATION_DISPATCHING)
         ok = hand_off(client, pick.download_url, name=pick.title)
         item = QueueItem(game, platform_slug, pick.title, pick.seeders,
                          "grabbed" if ok else "failed",
@@ -1516,7 +1565,8 @@ class ROMarr:
                          release_id=release_id(pick),
                          indexer=getattr(pick, "indexer", ""),
                          size=getattr(pick, "size", 0),
-                         release_fault=not ok)
+                         release_fault=not ok,
+                         external_request_id=external_request_id)
         self.store.enqueue(item)
         if ok:
             self.store.record(Event(kind="grabbed", game=game, platform=platform_slug,
@@ -1534,10 +1584,210 @@ class ROMarr:
                                 getattr(pick, "indexer", ""), reasons))
         else:
             self.store.want(game, platform_slug)
+            self.store.link_wanted_request(
+                game, platform_slug, external_request_id)
             self.store.note_failure(game, platform_slug, item.detail)
             self.store.record(Event(kind="failed", game=game, platform=platform_slug,
                                     release=pick.title, detail=item.detail))
-        return {"ok": ok, "release": pick.title, "seeders": pick.seeders}
+        return {"ok": ok, "release": pick.title, "seeders": pick.seeders,
+                **({"error": item.detail} if not ok else {})}
+
+    def start_external_request(self, external_request_id: str) -> bool:
+        """Start one pending durable request, suppressing duplicate workers."""
+        item = self.store.integration_request(external_request_id)
+        if item is None or item.status != "searching":
+            return False
+        with self._external_request_lock:
+            if external_request_id in self._external_request_workers:
+                return False
+            self._external_request_workers.add(external_request_id)
+        worker = threading.Thread(
+            target=self.run_external_request,
+            args=(external_request_id, item.game, item.platform),
+            name=f"integration-request-{external_request_id[:24]}",
+            daemon=True,
+        )
+        try:
+            worker.start()
+        except Exception:
+            with self._external_request_lock:
+                self._external_request_workers.discard(external_request_id)
+            raise
+        return True
+
+    def reconcile_integration_request(self, item) -> None:
+        """Recover a pending search or reflect its persisted queue outcome."""
+        item = self.store.integration_request(item.external_request_id) or item
+        if item.status == "available":
+            return
+        queue_item = self.store.integration_queue_item(
+            item.external_request_id, after=item.attempted_at)
+        if queue_item is not None:
+            if queue_item.state == "grabbed":
+                self.store.update_integration_request(
+                    item.external_request_id, status="downloading")
+            elif queue_item.state == "imported":
+                self.store.update_integration_request(
+                    item.external_request_id, status="available")
+            elif queue_item.state in ("failed", "import-failed"):
+                self.store.update_integration_request(
+                    item.external_request_id,
+                    status="failed",
+                    detail=queue_item.detail or "Acquisition failed.")
+            return
+        with self._external_request_lock:
+            active = item.external_request_id in self._external_request_workers
+        if active:
+            return
+        if item.status == "searching":
+            self.start_external_request(item.external_request_id)
+        elif item.status in ("downloading", "importing"):
+            # The downloader may have accepted the release before the process
+            # stopped, leaving no persisted queue row. Keep this request from
+            # being dispatched again until its owner checks downloader history.
+            self.store.update_integration_request(
+                item.external_request_id,
+                status="failed",
+                detail=INTEGRATION_DISPATCH_UNCERTAIN)
+
+    def run_external_request(self, external_request_id: str,
+                             game: str, platform: str) -> None:
+        """Run a machine request off the HTTP thread and persist its outcome."""
+        try:
+            outcome = self.request(
+                game, platform, external_request_id=external_request_id)
+            if outcome.get("ok"):
+                self.store.update_integration_request(
+                    external_request_id, status="downloading")
+            else:
+                self.store.update_integration_request(
+                    external_request_id, status="failed",
+                    detail=str(outcome.get("error") or "Acquisition failed."))
+        except Exception as err:
+            log.exception("external request %s failed", external_request_id)
+            current = self.store.integration_request(external_request_id)
+            uncertain_handoff = bool(
+                current is not None
+                and current.status == "downloading"
+                and current.detail == INTEGRATION_DISPATCHING)
+            self.store.update_integration_request(
+                external_request_id, status="failed",
+                detail=(INTEGRATION_DISPATCH_UNCERTAIN if uncertain_handoff
+                        else f"Acquisition failed ({err.__class__.__name__})."))
+        finally:
+            with self._external_request_lock:
+                self._external_request_workers.discard(external_request_id)
+
+    def integration_request_view(self, item) -> dict:
+        """Public status shape; never return internal paths or error detail."""
+        response = {
+            "externalRequestId": item.external_request_id,
+            "game": item.game,
+            "platform": item.platform,
+            "status": item.status,
+            "createdAt": item.created,
+            "updatedAt": item.updated,
+            "deliverable": bool(self.integration_assets(item)),
+        }
+        if item.detail == INTEGRATION_DISPATCH_UNCERTAIN:
+            response["error"] = INTEGRATION_DISPATCH_UNCERTAIN
+        return response
+
+    def integration_assets(self, item) -> list[dict]:
+        """Return only assets whose current files remain inside their library."""
+        if item.status != "available":
+            return []
+        visible = []
+        for asset in item.assets:
+            library_id = str(asset.get("library_id") or "")
+            target = next(((cfg, backend) for cfg, backend in self.game_libraries
+                           if str(cfg.get("id") or "") == library_id), None)
+            if target is None:
+                continue
+            root = self.library_root(target[0])
+            relative = Path(str(asset.get("relative_path") or ""))
+            if relative.is_absolute() or ".." in relative.parts:
+                continue
+            try:
+                resolved_root = root.resolve(strict=True)
+                resolved = (resolved_root / relative).resolve(strict=True)
+                if not resolved.is_relative_to(resolved_root) or not resolved.is_file():
+                    continue
+                size = resolved.stat().st_size
+            except OSError:
+                continue
+            visible.append({
+                "id": str(asset.get("id") or ""),
+                "name": str(asset.get("name") or resolved.name),
+                "size": size,
+                "url": ("/api/v1/integration/requests/"
+                        f"{quote(item.external_request_id, safe='')}/assets/"
+                        f"{quote(str(asset.get('id') or ''), safe='')}")
+            })
+        return visible
+
+    def integration_asset(self, external_request_id: str,
+                          asset_id: str) -> tuple[Path, str, int] | None:
+        """Resolve an opaque asset ID again immediately before streaming it."""
+        item = self.store.integration_request(external_request_id)
+        if item is None or item.status != "available":
+            return None
+        selected = next((asset for asset in item.assets
+                         if asset.get("id") == asset_id), None)
+        if selected is None:
+            return None
+        library_id = str(selected.get("library_id") or "")
+        target = next(((cfg, backend) for cfg, backend in self.game_libraries
+                       if str(cfg.get("id") or "") == library_id), None)
+        if target is None:
+            return None
+        root = self.library_root(target[0])
+        relative = Path(str(selected.get("relative_path") or ""))
+        if relative.is_absolute() or ".." in relative.parts:
+            return None
+        try:
+            resolved_root = root.resolve(strict=True)
+            resolved = (resolved_root / relative).resolve(strict=True)
+            if not resolved.is_relative_to(resolved_root) or not resolved.is_file():
+                return None
+            # Refuse a final symlink even when its current target is inside the
+            # root. The asset record describes the imported file itself.
+            if (resolved_root / relative).is_symlink():
+                return None
+            return resolved, str(selected.get("name") or resolved.name), resolved.stat().st_size
+        except OSError:
+            return None
+
+    def imported_integration_assets(self, library_cfg: dict,
+                                    outcomes: list) -> list[dict]:
+        """Store safe root-relative references for successfully imported ROMs."""
+        library_id = str(library_cfg.get("id") or "")
+        if not library_id:
+            return []
+        try:
+            root = self.library_root(library_cfg).resolve(strict=True)
+        except OSError:
+            return []
+        assets = []
+        for outcome in outcomes:
+            if not outcome.ok or outcome.destination is None:
+                continue
+            try:
+                resolved = Path(outcome.destination).resolve(strict=True)
+                if not resolved.is_relative_to(root) or not resolved.is_file():
+                    log.warning("imported file is outside configured library root; "
+                                "not exposing it through the integration API")
+                    continue
+                assets.append({
+                    "id": secrets.token_urlsafe(18),
+                    "library_id": library_id,
+                    "relative_path": resolved.relative_to(root).as_posix(),
+                    "name": resolved.name,
+                    "size": resolved.stat().st_size,
+                })
+            except OSError:
+                continue
+        return assets
 
     # -- interactive search -------------------------------------------------
     #
@@ -1730,7 +1980,7 @@ class ROMarr:
             # automates a real click on a real page and refuses everything
             # that would make it a bypass.
             "refuses": ["captchas", "bot-detection challenges",
-                        "header spoofing", "logins ROMarr cannot pass"],
+                        "header spoofing", "logins ROMarrNG cannot pass"],
         }
 
     def ggrequestz(self) -> dict:
@@ -1772,7 +2022,7 @@ class ROMarr:
             "library_path_hint": self.path_hint(self.library),
             "libraries": self.libraries_status(),
             "platforms": len(PLATFORMS),
-            # DAT verification is the thing that separates ROMarr from a
+            # DAT verification is the thing that separates ROMarrNG from a
             # downloader, and the status page had no way to say whether it was
             # on. Get Started could therefore only ever report DATs as not set
             # up, not many were loaded.
@@ -1949,7 +2199,7 @@ class ROMarr:
     #: How many replacement grabs one sweep may make. A dead release is
     #: retired the moment it is noticed, but every replacement costs a full
     #: indexer search, and twenty of them at once is how a tracker decides
-    #: ROMarr is a scraper.
+    #: ROMarrNG is a scraper.
     MAX_REGRABS_PER_SWEEP = 3
 
     def retire_dead_downloads(self) -> dict:
@@ -2072,7 +2322,7 @@ class ROMarr:
                     or [])
 
     def scan(self, directory: str) -> dict:
-        """Manual import: what is already on disk that ROMarr could adopt."""
+        """Manual import: what is already on disk that ROMarrNG could adopt."""
         from .sniff import disagrees_with
 
         from .sniff import identify_file, looks_hollow
@@ -2147,16 +2397,16 @@ class ROMarr:
         """Import one file the operator picked out of a manual-import scan.
 
         Separate from `import_finished` because the two have different
-        authorities. That one acts on a download ROMarr asked for, and can
+        authorities. That one acts on a download ROMarrNG asked for, and can
         infer the platform from the request that started it. This one acts on
         a file somebody pointed at, so the operator's platform choice wins over
-        the guess -- they can see the file and ROMarr cannot.
+        the guess -- they can see the file and ROMarrNG cannot.
 
         `force` is what makes a BAD_DUMP importable. It is deliberately a
         separate argument rather than a mode: a bad dump is a file whose hash
         does not match a known ROM of the same size, and the operator may well
         know why -- a translation patch, a hack, a modified Pokemon save
-        editor's output. ROMarr does not get to decide that for them. What it
+        editor's output. ROMarrNG does not get to decide that for them. What it
         does get to do is refuse silence: a forced import is recorded as forced,
         with the verdict that was overridden, so the library never claims a
         file was verified when it was not.
@@ -2170,7 +2420,7 @@ class ROMarr:
         platform = resolve(platform_slug) if platform_slug else None
         if platform is None:
             # Fall back to the scan's own guess, so a caller that trusts
-            # ROMarr's detection does not have to restate it.
+            # ROMarrNG's detection does not have to restate it.
             guess = scan_directory(str(source.parent), PLATFORMS, self.dats)
             for candidate in guess.candidates:
                 if candidate.filename == source.name:
@@ -2280,7 +2530,7 @@ class ROMarr:
         platform and costs one listing.
 
         Matched by name, not by hash. Hashing a library that size to draw a
-        progress bar would take hours, and the verdict recorded when ROMarr
+        progress bar would take hours, and the verdict recorded when ROMarrNG
         imported a file is already the better answer where it exists.
         """
         from .collections import PRESENT_UNKNOWN, PRESENT_VERIFIED, PRESENT_BAD
@@ -2570,7 +2820,7 @@ class ROMarr:
         Not folded into the stream-server row, because the two answer
         different questions and conflating them would hide the interesting
         one. A stream server that is down is broken. A Moonlight host that is
-        up but whose app list ROMarr cannot read is *working perfectly* and
+        up but whose app list ROMarrNG cannot read is *working perfectly* and
         still grants nothing -- and an operator needs to be told which of
         those they are looking at.
         """
@@ -2590,7 +2840,7 @@ class ROMarr:
         The PIN never originates here and cannot: it is generated by the
         client, on the user's device, and both host implementations wait on a
         human to supply it. This endpoint exists so that the human types it
-        into ROMarr instead of hunting for Wolf's PIN page in container logs
+        into ROMarrNG instead of hunting for Wolf's PIN page in container logs
         or finding Sunshine's admin panel -- it saves a search, not a step.
         """
         if not self.moonlight:
@@ -2598,7 +2848,7 @@ class ROMarr:
         return self.moonlight.submit_pin(
             str(body.get("pin") or ""),
             pair_secret=str(body.get("pair_secret") or ""),
-            name=str(body.get("name") or "ROMarr"))
+            name=str(body.get("name") or "ROMarrNG"))
 
     def platform_directory(self) -> list[dict]:
         """Every platform with how it plays, for the API and the UI."""
@@ -2632,7 +2882,7 @@ class ROMarr:
             "order": list(self.players.order),
             "setting": "ROMARR_PLAYERS",
             "known": sorted(PLAYERS),
-            # What each one can reach across the shelf ROMarr has walked. A
+            # What each one can reach across the shelf ROMarrNG has walked. A
             # capability with no number next to it is a claim; this is the
             # measurement.
             "library": (getattr(self, "_library_facets", None)
@@ -3158,7 +3408,7 @@ class ROMarr:
                 out["note"] = ("RomM holds no unreleased titles. Every row in "
                                "a ROM library is a file, or a catalogue entry "
                                "for a game that already shipped, so there is "
-                               "no release schedule to show -- and ROMarr "
+                               "no release schedule to show -- and ROMarrNG "
                                "will not invent one. Anything under Elsewhere "
                                "came from a metadata provider's catalogue and "
                                "is owned by nobody here.")
@@ -3261,10 +3511,10 @@ class ROMarr:
     _seed_state: dict = {"status": "idle", "seen": 0, "added": 0}
 
     def seed_status(self) -> dict:
-        state = dict(ROMarr._seed_state)
+        state = dict(ROMarrNG._seed_state)
         state["total"] = len(self.hashes)
-        state["running"] = bool(ROMarr._seed_thread
-                                and ROMarr._seed_thread.is_alive())
+        state["running"] = bool(ROMarrNG._seed_thread
+                                and ROMarrNG._seed_thread.is_alive())
         return state
 
     def start_hash_seed(self, *, quiet: bool = False) -> dict:
@@ -3277,26 +3527,26 @@ class ROMarr:
         """
         import threading as _threading
 
-        if ROMarr._seed_thread is not None and ROMarr._seed_thread.is_alive():
+        if ROMarrNG._seed_thread is not None and ROMarrNG._seed_thread.is_alive():
             return {"ok": True, "already": True, **self.seed_status(),
                     "detail": "Already reading your library."}
 
-        ROMarr._seed_state = {"status": "running", "seen": 0, "added": 0,
+        ROMarrNG._seed_state = {"status": "running", "seen": 0, "added": 0,
                               "started": datetime.now(timezone.utc)
                               .isoformat(timespec="seconds")}
 
         def run():
             try:
                 result = self.index_hashes_from_library(
-                    progress=ROMarr._seed_state)
-                ROMarr._seed_state.update(result, status="done")
+                    progress=ROMarrNG._seed_state)
+                ROMarrNG._seed_state.update(result, status="done")
             except Exception as err:                # noqa: BLE001 - reported
                 log.warning("hash seed failed: %s", err)
-                ROMarr._seed_state.update(status="failed", error=str(err))
+                ROMarrNG._seed_state.update(status="failed", error=str(err))
 
-        ROMarr._seed_thread = _threading.Thread(
+        ROMarrNG._seed_thread = _threading.Thread(
             target=run, name="romarr-hash-seed", daemon=True)
-        ROMarr._seed_thread.start()
+        ROMarrNG._seed_thread.start()
         if not quiet:
             log.info("reading hashes from the library in the background")
         return {"ok": True, "started": True, **self.seed_status(),
@@ -3462,14 +3712,14 @@ class ROMarr:
                                     f"{response.status_code}")}
         token = str(body.get("token") or "")
         if not token:
-            # An older ROMarr accepts the handshake and returns no token, so
+            # An older ROMarrNG accepts the handshake and returns no token, so
             # the relationship would look made and authenticate as nobody
             # forever. Refuse loudly instead of storing a peer that cannot
             # work.
             return {"ok": False,
                     "error": "that server completed the handshake but sent no "
                              "token back, so there is nothing to talk to it "
-                             "with. It is probably running a ROMarr from "
+                             "with. It is probably running a ROMarrNG from "
                              "before invitation links -- ask for the older "
                              "pasted invitation instead"}
         peer = Peer(peer_id=invite["peer_id"],
@@ -3488,7 +3738,7 @@ class ROMarr:
                "detail": f"Connected to {peer.name}. They confirm you on "
                          f"their side before you can see anything."}
         if not mine:
-            out["warning"] = ("Your ROMarr has no public URL set, so your "
+            out["warning"] = ("Your ROMarrNG has no public URL set, so your "
                               "friend's server has no address to call you "
                               "back on. Set it under Settings -> General.")
         return out
@@ -3498,7 +3748,7 @@ class ROMarr:
 
         netplay_answer reads `.sha1`, `.name` and `.verified` off whatever it
         is handed. Adapting here means a RomM friend goes through the exact
-        same verdict logic as a ROMarr one rather than a parallel copy that
+        same verdict logic as a ROMarrNG one rather than a parallel copy that
         could drift into disagreeing about what "mismatch" means.
         """
 
@@ -3524,9 +3774,9 @@ class ROMarr:
     ROMM_FRIEND_MAX = 10_000
 
     def _romm_friend_rows(self, peer) -> tuple[list, str]:
-        """A RomM friend's shelf, in the same shape a ROMarr peer projects.
+        """A RomM friend's shelf, in the same shape a ROMarrNG peer projects.
 
-        Projected to exactly the ROMarr peer fields on purpose: the rest of
+        Projected to exactly the ROMarrNG peer fields on purpose: the rest of
         the app should not need to know which kind of friend it is looking
         at, and a RomM row carries far more (paths, ids) that has no business
         being in a friends view.
@@ -3689,7 +3939,7 @@ class ROMarr:
         if entry is None:
             return {
                 "ok": False, "status": "unhashed",
-                "detail": ("ROMarr has not hashed this game yet, so it cannot "
+                "detail": ("ROMarrNG has not hashed this game yet, so it cannot "
                            "prove which dump you have. Run an audit of "
                            f"{platform or 'this platform'} under Tasks and "
                            "try again."),
@@ -3703,10 +3953,10 @@ class ROMarr:
                  "host": self.federation.name}
 
         if peer.kind == "romm":
-            # Their RomM cannot answer an offer, so ROMarr answers it on
+            # Their RomM cannot answer an offer, so ROMarrNG answers it on
             # their behalf from the hashes RomM already publishes. The
             # verdict is decided by exactly the same function, so a RomM
-            # friend and a ROMarr friend cannot disagree about what the four
+            # friend and a ROMarrNG friend cannot disagree about what the four
             # words mean.
             rows, err = (self._friend_shelves.get(peer.peer_id, ([], 0))[0],
                          "")
@@ -3830,7 +4080,7 @@ class ROMarr:
                  "scanned": 0, "verified": 0, "bad": 0, "unknown": 0,
                  "bad_files": [], "duplicates": [],
                  "started": datetime.now(timezone.utc).isoformat(timespec="seconds")}
-        ROMarr._audit_state = state
+        ROMarrNG._audit_state = state
 
         def run():
             from .dat import BAD_DUMP, VERIFIED, hash_file
@@ -3864,7 +4114,7 @@ class ROMarr:
                     state["unknown"] += 1
                 sha = digest.get("sha1", "")
                 # Keep the hash. Netplay is decided on bytes, and this walk
-                # is the only place ROMarr ever computes them; discarding
+                # is the only place ROMarrNG ever computes them; discarding
                 # them here is what left an offer with nothing to carry.
                 if sha:
                     self.hashes.add(
@@ -3889,9 +4139,9 @@ class ROMarr:
                      state["unknown"], len(state["duplicates"]),
                      len(self.hashes))
 
-        ROMarr._audit_thread = _threading.Thread(
+        ROMarrNG._audit_thread = _threading.Thread(
             target=run, name="romarr-audit", daemon=True)
-        ROMarr._audit_thread.start()
+        ROMarrNG._audit_thread.start()
         return dict(state)
 
     def search_missing(self, *, auto: bool = False) -> dict:
@@ -3962,10 +4212,10 @@ class ROMarr:
                 f"grabbed {grabbed_count}")
 
     #: Where release news comes from. Only ever read, never written to.
-    RELEASES_URL = "https://api.github.com/repos/BlizzHacker/romarr/releases/latest"
+    RELEASES_URL = "https://api.github.com/repos/snapetech/ROMarrNG/releases/latest"
 
     def check_update(self) -> dict:
-        """Ask github.com whether a newer ROMarr exists. Telling somebody is
+        """Ask github.com whether a newer ROMarrNG exists. Telling somebody is
         the entire feature -- nothing is downloaded or applied, because an
         *arr that updates itself is an *arr that restarts mid-import."""
         import requests as _requests
@@ -4033,7 +4283,7 @@ class ROMarr:
     def scan_launchers(self) -> dict:
         """Every game the launchers on THIS machine have installed.
 
-        Useful directly when ROMarr runs on the gaming PC, which is a common
+        Useful directly when ROMarrNG runs on the gaming PC, which is a common
         Windows install; when it runs on a server,
         `scripts/connect_launchers.py` performs the same scan on the PC and
         pushes the result here. Either way no store credential is involved:
@@ -4203,8 +4453,8 @@ class ROMarr:
         """Batch decompression: extract, validate against DATs, then delete.
 
         The workflow issue #22 asked for. Compressatorium does the extraction
-        (CHD, RVZ, Z3DS, NSZ, CSO, 7z, zip -- every format it speaks); ROMarr
-        does the verification, because ROMarr holds the DAT index and the
+        (CHD, RVZ, Z3DS, NSZ, CSO, 7z, zip -- every format it speaks); ROMarrNG
+        does the verification, because ROMarrNG holds the DAT index and the
         question "is this the published dump" is answered here, not by the
         extractor.
 
@@ -4300,7 +4550,7 @@ class ROMarr:
                 continue
             # Which library this platform belongs to. A platform rule wins over
             # the default, so "PSX goes to Gaseous" is one row in the Libraries
-            # page rather than a second ROMarr.
+            # page rather than a second ROMarrNG.
             target = self.library_for(platform.slug)
             if target is None:
                 # Nothing to import into. Recorded rather than skipped: a
@@ -4313,9 +4563,17 @@ class ROMarr:
                 results.append({"name": name, "ok": False, "reason": detail})
                 if queue_item is not None:
                     queue_item.state = "import-failed"
+                    if queue_item.external_request_id:
+                        self.store.update_integration_request(
+                            queue_item.external_request_id, status="failed",
+                            detail=detail)
                 continue
             target_cfg, target_lib = target
             label = target_cfg.get("name") or getattr(target_lib, "name", "library")
+
+            if queue_item is not None and queue_item.external_request_id:
+                self.store.update_integration_request(
+                    queue_item.external_request_id, status="importing")
 
             outcomes = import_rom(
                 path, platform, self.library_root(target_cfg),
@@ -4334,6 +4592,10 @@ class ROMarr:
                     # exist or a full disc is the install's problem and must
                     # not cost the release a place on the blocklist.
                     queue_item.release_fault = True
+                    if queue_item.external_request_id:
+                        self.store.update_integration_request(
+                            queue_item.external_request_id, status="failed",
+                            detail="no ROMs found in completed download")
                 continue
 
             any_ok = any(o.ok for o in outcomes)
@@ -4354,6 +4616,15 @@ class ROMarr:
                 # Marked so the scheduled sweep never re-attempts it; the
                 # Tasks page button clears failure marks to retry.
                 queue_item.state = "imported" if any_ok else "import-failed"
+                if queue_item.external_request_id:
+                    assets = self.imported_integration_assets(target_cfg, outcomes)
+                    self.store.update_integration_request(
+                        queue_item.external_request_id,
+                        status="available" if any_ok else "failed",
+                        detail=("Imported files are not available through the "
+                                "configured library root." if any_ok and not assets
+                                else ""),
+                        assets=assets if any_ok else [])
             if any_ok:
                 if self.store.settings.get("rescan_after_import", True):
                     target_lib.rescan(platform.slug)
@@ -4371,9 +4642,13 @@ class ROMarr:
 
 # -- HTTP ------------------------------------------------------------------
 
-def make_handler(service: ROMarr):
+# Keep the original import name for downstream Python callers that already
+# constructed the upstream class directly.
+ROMarr = ROMarrNG
+
+def make_handler(service: ROMarrNG):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "ROMarr"
+        server_version = "ROMarrNG"
 
         def _send(self, code: int, body: bytes, content_type: str):
             self.send_response(code)
@@ -4384,6 +4659,88 @@ def make_handler(service: ROMarr):
 
         def _json(self, code: int, payload):
             self._send(code, json.dumps(payload).encode(), "application/json")
+
+        def _stream_integration_asset(self, path: Path, name: str, size: int):
+            """Stream one validated file with attachment and byte-range support."""
+            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            fd = None
+            try:
+                fd = os.open(path, flags)
+                file_info = os.fstat(fd)
+                file_size = file_info.st_size
+                if not stat.S_ISREG(file_info.st_mode) or file_size != size:
+                    os.close(fd)
+                    return self._json(404, {"error": "asset not found"})
+            except OSError:
+                if fd is not None:
+                    os.close(fd)
+                return self._json(404, {"error": "asset not found"})
+
+            start, end = 0, file_size - 1
+            requested_range = self.headers.get("Range", "")
+            if requested_range:
+                match = re.fullmatch(r"bytes=(\d*)-(\d*)", requested_range.strip())
+                if not match or file_size == 0:
+                    os.close(fd)
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{file_size}")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                first, last = match.groups()
+                if first:
+                    start = int(first)
+                    end = int(last) if last else file_size - 1
+                else:
+                    suffix = int(last or "0")
+                    if suffix <= 0:
+                        os.close(fd)
+                        self.send_response(416)
+                        self.send_header("Content-Range", f"bytes */{file_size}")
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                        return
+                    start = max(0, file_size - suffix)
+                if start >= file_size or end < start:
+                    os.close(fd)
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{file_size}")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                end = min(end, file_size - 1)
+
+            length = max(0, end - start + 1)
+            ascii_name = re.sub(r"[^A-Za-z0-9._-]", "_",
+                                name.encode("ascii", "ignore").decode()) or "download"
+            quoted_name = quote(name, safe="")
+            self.send_response(206 if requested_range else 200)
+            self.send_header("Content-Type", mimetypes.guess_type(name)[0]
+                             or "application/octet-stream")
+            self.send_header("Content-Disposition",
+                             f"attachment; filename=\"{ascii_name}\"; "
+                             f"filename*=UTF-8''{quoted_name}")
+            self.send_header("Content-Length", str(length))
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Cache-Control", "no-store")
+            if requested_range:
+                self.send_header("Content-Range",
+                                 f"bytes {start}-{end}/{file_size}")
+            self.end_headers()
+            try:
+                with os.fdopen(fd, "rb") as source:
+                    source.seek(start)
+                    remaining = length
+                    while remaining:
+                        chunk = source.read(min(1024 * 1024, remaining))
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        remaining -= len(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                # A browser cancelling its own download is not a server fault.
+                return
 
         def _guard(self, handler):
             """Turn an unhandled failure into a reply instead of a dead socket.
@@ -4443,7 +4800,7 @@ def make_handler(service: ROMarr):
             Shared by login and first-run setup so the cookie's flags are
             stated once. HttpOnly so a script cannot read it; SameSite=Strict
             so another site cannot ride it; Path=/ so it covers the API. Not
-            Secure: ROMarr is normally plain http on a LAN, and a Secure
+            Secure: ROMarrNG is normally plain http on a LAN, and a Secure
             cookie would simply never be stored there.
             """
             self.send_response(200)
@@ -4573,6 +4930,42 @@ def make_handler(service: ROMarr):
         def _get(self):
             route = urlparse(self.path)
             query = parse_qs(route.query)
+            parts = route.path.split("/")
+            if route.path == "/api/v1/integration/ping":
+                return self._json(200, {
+                    "service": "ROMarrNG",
+                    "version": VERSION,
+                    "apiVersion": 1,
+                })
+            if (len(parts) == 6 and parts[1:5] ==
+                    ["api", "v1", "integration", "requests"]):
+                external_id = unquote_plus(parts[5])
+                item = service.store.integration_request(external_id)
+                if item is None:
+                    return self._json(404, {"error": "request not found"})
+                service.reconcile_integration_request(item)
+                item = service.store.integration_request(external_id)
+                return self._json(200, service.integration_request_view(item))
+            if (len(parts) == 7 and parts[1:5] ==
+                    ["api", "v1", "integration", "requests"] and
+                    parts[6] == "assets"):
+                external_id = unquote_plus(parts[5])
+                item = service.store.integration_request(external_id)
+                if item is None:
+                    return self._json(404, {"error": "request not found"})
+                return self._json(200, {
+                    "assets": service.integration_assets(item),
+                    "bundleSupported": False,
+                })
+            if (len(parts) == 8 and parts[1:5] ==
+                    ["api", "v1", "integration", "requests"] and
+                    parts[6] == "assets"):
+                external_id = unquote_plus(parts[5])
+                asset_id = unquote_plus(parts[7])
+                asset = service.integration_asset(external_id, asset_id)
+                if asset is None:
+                    return self._json(404, {"error": "asset not found"})
+                return self._stream_integration_asset(*asset)
             if route.path == "/link":
                 # Served before the sign-in check on purpose, and without
                 # consulting anything: the visitor is a stranger holding a
@@ -4620,7 +5013,12 @@ def make_handler(service: ROMarr):
             if route.path == "/api/v1/wanted/missing":
                 return self._json(200, {"items": service.store.missing()})
             if route.path == "/api/v1/queue":
-                return self._json(200, {"items": [asdict(i) for i in service.queue]})
+                items = []
+                for item in service.queue:
+                    row = asdict(item)
+                    row.pop("external_request_id", None)
+                    items.append(row)
+                return self._json(200, {"items": items})
             if route.path == "/api/v1/history":
                 limit = int((query.get("limit") or ["100"])[0])
                 return self._json(200, {"items": service.store.history(limit)})
@@ -5011,7 +5409,12 @@ def make_handler(service: ROMarr):
                     name, (query.get("platform") or [""])[0],
                     present=missing not in ("1", "true", "yes")))
             if route.path == "/api/queue":
-                return self._json(200, [asdict(i) for i in service.queue])
+                items = []
+                for item in service.queue:
+                    row = asdict(item)
+                    row.pop("external_request_id", None)
+                    items.append(row)
+                return self._json(200, items)
             if route.path == "/api/v1/release":
                 game = (query.get("game") or [""])[0].strip()
                 if not game:
@@ -5040,6 +5443,10 @@ def make_handler(service: ROMarr):
         def _post(self):
             route = urlparse(self.path)
             length = int(self.headers.get("Content-Length") or 0)
+            if (route.path == "/api/v1/integration/requests"
+                    and length > 8192):
+                self._discard(length)
+                return self._json(413, {"error": "integration request too large"})
             # The capture body is assembled by a web page, so its size is
             # checked before it is read rather than after. `read(length)` on a
             # declared gigabyte allocates a gigabyte first and refuses second,
@@ -5071,6 +5478,70 @@ def make_handler(service: ROMarr):
                 body = json.loads(self.rfile.read(length) or b"{}")
             except json.JSONDecodeError:
                 return self._json(400, {"error": "invalid json"})
+
+            parts = route.path.split("/")
+            if (len(parts) == 7 and parts[1:5] ==
+                    ["api", "v1", "integration", "requests"] and
+                    parts[6] == "retry"):
+                if not isinstance(body, dict):
+                    return self._json(400, {
+                        "error": "retry body must be an object"})
+                external_id = unquote_plus(parts[5])
+                item = service.store.integration_request(external_id)
+                if item is None:
+                    return self._json(404, {"error": "request not found"})
+                service.reconcile_integration_request(item)
+                item = service.store.integration_request(external_id)
+                if item.status != "failed":
+                    return self._json(409, {
+                        "error": "only failed requests can be retried",
+                        "request": service.integration_request_view(item),
+                    })
+                if (item.detail == INTEGRATION_DISPATCH_UNCERTAIN
+                        and body.get("confirmNoExistingDownload") is not True):
+                    return self._json(409, {
+                        "error": INTEGRATION_DISPATCH_UNCERTAIN,
+                        "confirmationRequired": "confirmNoExistingDownload",
+                        "request": service.integration_request_view(item),
+                    })
+                service.store.update_integration_request(
+                    external_id, status="searching", detail="", assets=[])
+                service.start_external_request(external_id)
+                item = service.store.integration_request(external_id)
+                return self._json(202, service.integration_request_view(item))
+
+            if route.path == "/api/v1/integration/requests":
+                if not isinstance(body, dict):
+                    return self._json(400, {"error": "request body must be an object"})
+                raw_external_id = body.get("externalRequestId")
+                raw_game = body.get("game")
+                raw_platform = body.get("platform")
+                if not all(isinstance(value, str) for value in
+                           (raw_external_id, raw_game, raw_platform)):
+                    return self._json(400, {
+                        "error": "externalRequestId, game, and platform must be strings"
+                    })
+                external_id = raw_external_id.strip()
+                game = raw_game.strip()
+                platform_name = raw_platform.strip()
+                platform = resolve(platform_name)
+                if (not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", external_id)
+                        or not game or len(game) > 500 or platform is None):
+                    return self._json(400, {
+                        "error": "externalRequestId, game, and a supported platform are required"
+                    })
+                item, created = service.store.create_integration_request(
+                    game, platform.slug, external_id)
+                if item.game != game or item.platform != platform.slug:
+                    return self._json(409, {
+                        "error": "externalRequestId is already bound to another request"
+                    })
+                if not created:
+                    service.reconcile_integration_request(item)
+                    item = service.store.integration_request(external_id)
+                    return self._json(200, service.integration_request_view(item))
+                service.start_external_request(external_id)
+                return self._json(202, service.integration_request_view(item))
 
             if route.path == "/api/v1/capture":
                 # Catalogue rows the operator's own browser saw, from a site no
@@ -5130,7 +5601,7 @@ def make_handler(service: ROMarr):
             if route.path == "/api/v1/manualimport":
                 # The action half of Manual Import. GET scans and reports;
                 # this adopts one file the operator picked, with their
-                # platform choice winning over ROMarr's guess.
+                # platform choice winning over ROMarrNG's guess.
                 return self._json(200, service.adopt(
                     str(body.get("path") or ""),
                     str(body.get("platform") or ""),
@@ -5251,7 +5722,7 @@ def make_handler(service: ROMarr):
                     # failure would surface much later as a silent nothing.
                     payload["warning"] = (
                         "This invitation carries no address for your server, "
-                        "so your friend's ROMarr cannot call you back. Set "
+                        "so your friend's ROMarrNG cannot call you back. Set "
                         "your public URL under Settings -> General, then mint "
                         "a fresh invitation.")
                 return self._json(200, payload)
@@ -5372,7 +5843,7 @@ def make_handler(service: ROMarr):
                     "peer_id": peer.peer_id, "name": peer.name,
                     "titles": len(rows),
                     "detail": f"Connected to {peer.name}: {len(rows)} title(s) "
-                              f"with hashes ROMarr can match on."})
+                              f"with hashes ROMarrNG can match on."})
             if route.path == "/api/v1/friends/want":
                 # Something off a friend's shelf, into MY wanted list. My
                 # indexers fetch it; nothing comes from my friend.
@@ -5491,7 +5962,7 @@ def make_handler(service: ROMarr):
                 if service.claimed:
                     return self._json(409, {
                         "error": "already set up",
-                        "detail": "This ROMarr already has a password. Sign in "
+                        "detail": "This ROMarrNG already has a password. Sign in "
                                   "instead.",
                     })
                 password = str(body.get("password") or "")
@@ -5530,7 +6001,7 @@ def make_handler(service: ROMarr):
                 return self._send_session(token, {"ok": True})
             if route.path == "/api/v1/connection/test":
                 got = service.notify(Message(
-                    "grab", "ROMarr test notification",
+                    "grab", "ROMarrNG test notification",
                     body="If you can read this, the connection works.",
                     reasons=("+50 this is a test",)))
                 return self._json(200, {"results": got})
@@ -5559,7 +6030,7 @@ def make_handler(service: ROMarr):
                 return self._json(200, {
                     "entry": submission.as_entry(),
                     "submit_url": submission_link(submission),
-                    "note": "ROMarr does not post this for you. Open the link "
+                    "note": "ROMarrNG does not post this for you. Open the link "
                             "to review and submit it yourself.",
                 })
             if route.path == "/api/v1/hub/source/check":
@@ -5762,7 +6233,7 @@ def make_handler(service: ROMarr):
 
 
 def serve(port: int = 6868, env: dict[str, str] | None = None):
-    service = ROMarr(env)
+    service = ROMarrNG(env)
     httpd = ThreadingHTTPServer(("0.0.0.0", port), make_handler(service))
 
     # Native HTTPS, for installs with no reverse proxy in front. Both
@@ -5784,6 +6255,6 @@ def serve(port: int = 6868, env: dict[str, str] | None = None):
             log.error("could not load ROMARR_SSL_CERT/ROMARR_SSL_KEY (%s); "
                       "serving plain HTTP", err)
 
-    log.info("ROMarr listening on %s://0.0.0.0:%d, library=%s",
+    log.info("ROMarrNG listening on %s://0.0.0.0:%d, library=%s",
              scheme, port, service.library)
     httpd.serve_forever()

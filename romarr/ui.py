@@ -706,7 +706,7 @@ function go(page){
     collections:'Collections \u2014 full sets and 1G1R',
     getstarted:'Get Started',
     hub:'ROM Hub — Plugins'};
-  $('#top h1').textContent=titles[page]||'ROMarr';
+  $('#top h1').textContent=titles[page]||'ROMarrNG';
   $('#search').classList.toggle('hide', !['library','add'].includes(page));
   (RENDER[page]||RENDER.library)();
 }
@@ -725,10 +725,10 @@ RENDER.hub=async()=>{
       ? '<div class="panel-note" style="border-left:3px solid var(--ok)">'
         +'<b>Plugins run confined.</b> Each runs as its own subprocess with no '
         +'library token and no sockets of its own &mdash; it can only reach the '
-        +'hosts it declared. It can still read files ROMarr can.</div>'
+        +'hosts it declared. It can still read files ROMarrNG can.</div>'
       : '<div class="panel-note panel-warn"><b>Plugins run with no '
         +'confinement.</b> '+esc(hs.sandbox_detail||'')+' A plugin you install '
-        +'can reach any host and read any file ROMarr can.</div>');
+        +'can reach any host and read any file ROMarrNG can.</div>');
 
   const p=$('#page');
   p.innerHTML='<div class="empty">Reading the plugin catalogue…</div>';
@@ -794,7 +794,7 @@ RENDER.hub=async()=>{
       +'<input id="ownurl" placeholder="https://github.com/you/rom-hub-your-plugin"></div>'
       +'<button class="mini accent" id="ownadd">Check and install</button>'
       +'<div id="ownmsg"></div>'
-      +'<div class="panel-note">A plugin is code ROMarr runs. Only https, and only '
+      +'<div class="panel-note">A plugin is code ROMarrNG runs. Only https, and only '
       +'from a forge where you can read the source first — the check tells you which '
       +'hosts are allowed.</div></div>'
 
@@ -809,7 +809,7 @@ RENDER.hub=async()=>{
       +'placeholder="What it does, and what somebody is trusting when they run it."></textarea></div>'
       +'<button class="mini accent" id="ssubmit">Prepare submission</button>'
       +'<div id="smsg"></div>'
-      +'<div class="panel-note">ROMarr does not post this for you. It prepares the '
+      +'<div class="panel-note">ROMarrNG does not post this for you. It prepares the '
       +'entry and hands you a link to review and submit yourself.</div></div>'
       +'</div>';
 
@@ -842,7 +842,7 @@ RENDER.hub=async()=>{
         }
       }catch(e){
         actionError='Could not '+action+' '+slug+': '
-          +(e&&e.message?e.message:'ROMarr did not answer.');
+          +(e&&e.message?e.message:'ROMarrNG did not answer.');
       }
       render(await load());
     });
@@ -886,7 +886,7 @@ let LIB={platform:'',genre:'',region:'',decade:'',origin:'',source:'',sort:'',
 // What each catalogue is called on screen. Spelled out rather than shown as
 // the raw key, because "archive" and "flashpoint" mean nothing to somebody
 // who did not set the indexers up, and "cloud" has to say plainly that
-// ROMarr does not know where those came from.
+// ROMarrNG does not know where those came from.
 const SOURCE_LABEL={
   local:'On disk here',
   archive:'Archive.org (streams)',
@@ -967,7 +967,7 @@ RENDER.library=async()=>{
       Catalogued entries by source:
       ${srcRows.map(x=>`<b>${num(x.count)}</b> ${esc(SOURCE_LABEL[x.value]||x.value)}`)
         .join(' · ')}. Source is read from the filename each indexer writes,
-      so anything ROMarr cannot place stays “source unknown” rather than
+      so anything ROMarrNG cannot place stays “source unknown” rather than
       being filed under a guess.</p>`:''}
     ${T.counted_from==='cached rows'
       ?`<p class="help" style="margin:6px 0 0">Counted from the ${num(d.cached_total)}
@@ -1101,7 +1101,7 @@ function shelfEditor(g, meta){
 RENDER.add=async()=>{
   $('#page').innerHTML=`<div class="card">
     <h3>Request a game</h3>
-    <p class="help">ROMarr searches your indexers, picks the healthiest release
+    <p class="help">ROMarrNG searches your indexers, picks the healthiest release
       for the platform, hands it to the download client and files the ROM into RomM.</p>
     <div class="row">
       <div class="field" style="flex:1;margin:0"><label>Game</label>
@@ -1299,9 +1299,9 @@ RENDER.lists=async()=>{
         background:var(--bg);border:1px solid var(--line);border-radius:6px;
         padding:10px;white-space:pre-wrap">python scripts/connect_launchers.py --url ${location.origin} --key &lt;your API key&gt;</pre>
       <div class="row" style="margin:8px 0">
-        <button class="btn ghost" id="l-scan">Scan the ROMarr server</button>
-        <span class="help" style="margin:0">Only useful if ROMarr runs on
-          the machine you play on &mdash; it scans wherever ROMarr itself
+        <button class="btn ghost" id="l-scan">Scan the ROMarrNG server</button>
+        <span class="help" style="margin:0">Only useful if ROMarrNG runs on
+          the machine you play on &mdash; it scans wherever ROMarrNG itself
           lives, which is usually a server with no launchers.</span></div>
       <div id="l-noapi" style="color:var(--dim);font-size:12.5px"></div></div>`;
 
@@ -1332,7 +1332,7 @@ RENDER.lists=async()=>{
           style="width:100%;resize:vertical;font:12px/1.5 ui-monospace,
           Menlo,monospace"></textarea>
         <div style="color:var(--dim);font-size:11.5px;margin-top:4px">
-          Paste the entire page if you like — ROMarr pulls the value out.</div>
+          Paste the entire page if you like — ROMarrNG pulls the value out.</div>
       </div>
       <div id="testline"></div>
       <div class="foot">
@@ -1471,7 +1471,7 @@ function editList(item){
     ${(item.unmatched||[]).length?`<details style="margin-top:10px">
       <summary class="help" style="margin:0;cursor:pointer">
         ${item.unmatched.length} title(s) kept aside — no ROM platform.
-        These are your modern store games; ROMarr acquires ROMs, so they
+        These are your modern store games; ROMarrNG acquires ROMs, so they
         wait here rather than pretending to be cartridges.</summary>
       <div style="color:var(--dim);font-size:12px;max-height:180px;
         overflow:auto;margin-top:6px">${item.unmatched.map(esc).join('<br>')}
@@ -1627,7 +1627,7 @@ RENDER.discover=async()=>{
         :`<div class="pf" style="opacity:.6">no retro platform</div>`}</div>`;
   }).join('')}</div>
   <p class="help" style="margin-top:10px">Request shows only for games on a
-    platform ROMarr models — the scorer takes it from there, DAT
+    platform ROMarrNG models — the scorer takes it from there, DAT
     verification included.</p>`;
   document.querySelectorAll('[data-dreq]').forEach(b=>b.onclick=async()=>{
     const g=d.items[Number(b.dataset.dreq)];
@@ -1658,7 +1658,7 @@ RENDER.peers=async()=>{
     fetch:'Download from me'};
   $('#page').innerHTML=`<div class="card"><h3>Friends</h3>
       <p class="help">Share a library with someone running their own server —
-        RomM, Gaseous, Retrom, it does not matter, because ROMarr speaks all
+        RomM, Gaseous, Retrom, it does not matter, because ROMarrNG speaks all
         of them. Peering is by invitation and confirmed on both sides: there
         is no directory, and nobody finds you.
         <b>Peering shares nothing by itself</b> — you choose what each friend
@@ -1669,7 +1669,7 @@ RENDER.peers=async()=>{
         <button class="btn ghost" id="p-romm">Add a RomM server</button>
       </div>
       <p class="help" style="margin-top:10px">Your friend does not have to run
-        ROMarr. If they run <b>RomM</b>, ask them for an account on it and use
+        ROMarrNG. If they run <b>RomM</b>, ask them for an account on it and use
         <b>Add a RomM server</b> — RomM already publishes a hash for every ROM,
         so browsing and netplay matching both work with nothing installed on
         their side. The trade is honest: an account on their RomM grants
@@ -1678,13 +1678,13 @@ RENDER.peers=async()=>{
     <div class="card"><h3>What netplay can prove</h3>
       <p class="help">Netplay is settled on the ROM's SHA1, never its title —
         “Super Mario Kart” is four different ROMs, and two of them desync
-        within seconds in a way that reads as lag. ROMarr can only match games
+        within seconds in a way that reads as lag. ROMarrNG can only match games
         whose hash it knows.</p>
       ${hx.count
         ? `<div class="panel"><b>${hx.count.toLocaleString()}</b> dump(s) can be
              matched, across ${Object.keys(hx.platforms||{}).length} platform(s).</div>`
         : `<div class="panel panel-warn">No hashes yet, so every netplay offer
-             will come back <i>missing</i>. ROMarr reads these from your library
+             will come back <i>missing</i>. ROMarrNG reads these from your library
              server automatically — it already stores a hash for every ROM it
              has scanned.</div>`}
       <div id="p-seedlive"></div>
@@ -1747,7 +1747,7 @@ RENDER.peers=async()=>{
         <button class="btn ghost" id="p-copy">Copy the link</button>
         <button class="btn ghost" id="p-copycode">Copy the code</button></div>
       <details style="margin-top:14px"><summary class="help"
-        style="cursor:pointer">Your friend's ROMarr is older than invitation
+        style="cursor:pointer">Your friend's ROMarrNG is older than invitation
         links</summary>
         <p class="help">The one-piece form. It contains the long secret, so
           send it the way you would send a password — and prefer the link and
@@ -1799,7 +1799,7 @@ RENDER.peers=async()=>{
       <button class="btn" id="p-claim-go">Become friends</button>
       <details style="margin-top:14px"><summary class="help"
         style="cursor:pointer">They sent one long block of JSON instead</summary>
-        <p class="help">An older ROMarr, or an invitation minted before this
+        <p class="help">An older ROMarrNG, or an invitation minted before this
           version. Paste the whole block.</p>
         <textarea id="p-blob" rows="4" style="width:100%;font:12px/1.5
           ui-monospace,Menlo,monospace"
@@ -1816,7 +1816,7 @@ RENDER.peers=async()=>{
       try{ host=new URL($('#p-link-in').value.trim()).origin; }catch{}
       const frag=($('#p-link-in').value.match(/[#&]u=([^&]*)/)||[])[1];
       if(frag){ try{ host=new URL(decodeURIComponent(frag)).origin; }catch{} }
-      el.innerHTML=host?`<div class="panel" style="margin-bottom:12px">ROMarr
+      el.innerHTML=host?`<div class="panel" style="margin-bottom:12px">ROMarrNG
         will send this code to <b>${esc(host)}</b>.</div>`:'';
     };
     $('#p-link-in').oninput=showTarget; showTarget();
@@ -1915,7 +1915,7 @@ RENDER.peers=async()=>{
     m.className='modal';
     m.innerHTML=`<div class="box">
       <h3>Add a friend who runs RomM</h3>
-      <div class="sub">They do not need ROMarr, and nothing has to be
+      <div class="sub">They do not need ROMarrNG, and nothing has to be
         installed on their server. Ask them to make you an account on their
         RomM — read-only is enough.</div>
       <div class="field"><label>Their RomM address</label>
@@ -1926,7 +1926,7 @@ RENDER.peers=async()=>{
         <input type="password" data-f="password" autocomplete="off"></div>
       <div class="field"><label>Call them (optional)</label>
         <input type="text" data-f="name" placeholder="Dave's RomM"></div>
-      <div class="panel">ROMarr reads their library through RomM's own API,
+      <div class="panel">ROMarrNG reads their library through RomM's own API,
         including the SHA1 RomM stores for every ROM — which is what lets
         netplay agree on the bytes with a server that has never heard of this
         protocol.</div>
@@ -2051,7 +2051,7 @@ function netplayVerdict(r){
     unverified:'Playable, with a caveat',
     mismatch:'Same game, different dumps',
     missing:'They do not have this dump',
-    unhashed:'ROMarr has not hashed your copy yet',
+    unhashed:'ROMarrNG has not hashed your copy yet',
     error:'Could not ask'
   }[r.status]||r.status||'No answer';
   let extra='';
@@ -2128,12 +2128,12 @@ RENDER.ecosystem=async()=>{
       ${p.install?`<button class="btn ghost" data-copy="${esc(p.install)}"
         title="${esc(p.install)}">Copy install</button>`:''}
     </div></div>`;
-  $('#page').innerHTML=`<div class="card"><h3>The ecosystem ROMarr stands on</h3>
-      <p class="help">ROMarr acquires ROMs and files them — nothing more. It
+  $('#page').innerHTML=`<div class="card"><h3>The ecosystem ROMarrNG stands on</h3>
+      <p class="help">ROMarrNG acquires ROMs and files them — nothing more. It
         stores no library, serves no player, publishes no DAT, indexes no
         tracker. Every one of those is somebody else's work, and without them
         there is nothing here to automate. These are the projects that make
-        ROMarr possible; each links to its own home, and installable ones
+        ROMarrNG possible; each links to its own home, and installable ones
         carry their command. Go support them.</p></div>`
     +Object.entries(cats).map(([name,projects])=>
       `<div class="card"><h3>${esc(name)}</h3>
@@ -2161,7 +2161,7 @@ RENDER.stats=async()=>{
   };
   $('#page').innerHTML=`
     ${s.update_available?`<div class="card" style="border-color:var(--warn)">
-      <h3>Update available</h3><p class="help">ROMarr ${esc(s.latest_version)} is out;
+      <h3>Update available</h3><p class="help">ROMarrNG ${esc(s.latest_version)} is out;
       this install is running ${esc(s.version)}. Nothing updates itself &mdash;
       pull the new image when it suits you.</p></div>`:''}
     <div class="card"><h3>This install</h3><div class="st">
@@ -2185,7 +2185,7 @@ RENDER.stats=async()=>{
       ${bar(Object.fromEntries(Object.entries(s.library_sources)
         .sort((a,b)=>b[1]-a[1])
         .map(([k,v])=>[SOURCE_LABEL[k]||k,v])))}
-      <p class="help">Counted from the rows ROMarr has read. Each catalogue is
+      <p class="help">Counted from the rows ROMarrNG has read. Each catalogue is
         identified by the filename its indexer writes; anything that matches
         neither is left as “source unknown” rather than assigned to whichever
         catalogue is larger.</p></div>`:''}
@@ -2483,7 +2483,7 @@ RENDER.media=()=>settingsPage('Media Management',
        style="width:100%;resize:vertical;font:12px/1.5 ui-monospace,Menlo,monospace"
        placeholder="/downloads = /mnt/downloads">${esc(mapLines(SETTINGS.remote_path_mappings))}</textarea>
      <div style="color:var(--dim);font-size:11.5px;margin-top:4px">
-       One per line: what the download client says = what ROMarr sees.
+       One per line: what the download client says = what ROMarrNG sees.
        Longest matching prefix wins.</div></div>`
   +sel('library_layout','Folder structure',
      [['flat','Structure A — platform/rom'],['nested','Structure B — platform/roms/rom']],
@@ -2597,7 +2597,7 @@ RENDER.libraries=async()=>{
     <p class="help">Where finished ROMs are filed. Add more than one to send
       some platforms elsewhere &mdash; a platform rule wins over the default,
       so &ldquo;N64 goes to Retrom&rdquo; is one row here rather than a second
-      ROMarr. Each server needs its own path, as <b>ROMarr</b> sees it.</p>
+      ROMarrNG. Each server needs its own path, as <b>ROMarrNG</b> sees it.</p>
     ${noDefault?`<p class="help" style="color:var(--warn)">
       No library is marked default, so anything without a matching platform rule
       goes to the first one listed. Mark one to make that a decision.</p>`:''}
@@ -2681,7 +2681,7 @@ RENDER.general=()=>settingsPage('General',
      <div style="color:var(--dim);font-size:11.5px;margin-top:4px">
        How a friend’s server reaches yours. An invitation carries this — without
        it, whoever redeems your invitation has nowhere to call back to. Peering
-       is the only feature that needs ROMarr to know its own address.</div></div>`
+       is the only feature that needs ROMarrNG to know its own address.</div></div>`
   +chk('auto_import','Import completed downloads automatically',SETTINGS.auto_import)
   +`<div class="field"><label>Protocol</label>
      <select data-k="protocol">
@@ -2699,7 +2699,7 @@ RENDER.general=()=>settingsPage('General',
        SETTINGS.rss_sync_interval_minutes,'number')
   +fld('list_sync_interval_hours','List sync (hours)',
        SETTINGS.list_sync_interval_hours,'number')
-  +chk('update_check','Check github.com daily for a newer ROMarr (never auto-updates)',
+  +chk('update_check','Check github.com daily for a newer ROMarrNG (never auto-updates)',
        SETTINGS.update_check)
   +`<h3 style="margin-top:18px">Security</h3>
     <div class="row" style="gap:8px;align-items:center;margin:8px 0">
@@ -2841,7 +2841,7 @@ RENDER.status=async()=>{
         headers:{'Content-Type':'application/json'}, body:await file.text()});
       msg(!r.error, r.error||'Restored. Reloading…');
       if(!r.error) setTimeout(()=>location.reload(),1200);
-    }catch(_){ msg(false,'That file is not a ROMarr backup.'); }
+    }catch(_){ msg(false,'That file is not a ROMarrNG backup.'); }
     e.target.value='';
   };
   $('#ex-go').onclick=()=>save('/api/v1/export?what='+$('#ex-what').value
@@ -2859,19 +2859,19 @@ RENDER.status=async()=>{
          'romarr-'+b.dataset.f+'.export'));
 };
 
-// GG Requestz pushes to ROMarr; the reachability probe above is deliberately
+// GG Requestz pushes to ROMarrNG; the reachability probe above is deliberately
 // labelled as the opposite direction. The API key is revealed only after a
 // deliberate click, just like Settings -> General, because the finished URL
 // is itself a credential and should not sit in the page by default.
 const ggrequestzCard=g=>`<div class="card"><h3>GG Requestz requests</h3>
   <p class="help"><b>Configure this in GG Requestz, not ROM Hub.</b>
-  Set <code>REQUEST_WEBHOOK_URL</code> in the GG Requestz container to ROMarr's
-  authenticated receiver. <code>GGREQUESTZ_URL</code> in ROMarr only creates
+  Set <code>REQUEST_WEBHOOK_URL</code> in the GG Requestz container to ROMarrNG's
+  authenticated receiver. <code>GGREQUESTZ_URL</code> in ROMarrNG only creates
   the page link and reachability check above.</p>
-  <label>ROMarr URL as the GG Requestz container reaches it</label>
+  <label>ROMarrNG URL as the GG Requestz container reaches it</label>
   <input id="ggr-base" placeholder="http://romarr:6868">
   <p class="help">On the same Docker network this is normally
-  <code>http://romarr:6868</code>. On Unraid or separate networks, use ROMarr's
+  <code>http://romarr:6868</code>. On Unraid or separate networks, use ROMarrNG's
   LAN or HTTPS URL. The value must be reachable from inside GG Requestz.</p>
   <div class="row" style="flex-wrap:wrap;gap:8px;align-items:center">
     <button class="btn" id="ggr-build" type="button">Reveal setup value</button>
@@ -2885,7 +2885,7 @@ const ggrequestzCard=g=>`<div class="card"><h3>GG Requestz requests</h3>
   enable <code>request.auto_approve</code> or approve it manually. A successful
   delivery now receives HTTP 202. Rejected payloads receive HTTP 422 and are
   named in both applications' logs.</p>
-  <p class="help">Treat the finished URL like a password: it contains ROMarr's
+  <p class="help">Treat the finished URL like a password: it contains ROMarrNG's
   API key. Keep it on a trusted Docker network or HTTPS and do not paste it in
   public logs.</p></div>`;
 
@@ -2902,9 +2902,9 @@ const wireGGRequestz=()=>{
     build.disabled=true;
     try{
       if(!base.value.trim()) throw new Error(
-        'Enter the ROMarr URL reachable from inside GG Requestz');
+        'Enter the ROMarrNG URL reachable from inside GG Requestz');
       const d=await j('/api/v1/system/apikey');
-      if(!d.api_key) throw new Error('ROMarr did not return an API key');
+      if(!d.api_key) throw new Error('ROMarrNG did not return an API key');
       const target=new URL('/api/v1/webhook/ggrequestz',base.value.trim());
       target.searchParams.set('apikey',d.api_key);
       value.textContent='REQUEST_WEBHOOK_URL='+target.href;
@@ -2925,27 +2925,27 @@ const wireGGRequestz=()=>{
 //
 // The card is written to be readable when the answer is "nothing", because
 // that is the common case and the interesting one. A host that answers
-// /serverinfo but whose app list ROMarr cannot read is working perfectly and
+// /serverinfo but whose app list ROMarrNG cannot read is working perfectly and
 // grants no platform anything -- if this card rendered a green dot and
 // stopped, an operator would reasonably conclude their PS2 games were now
 // playable, and they would not be.
 //
 // The pairing section never says "Pair" on its own. Moonlight's PIN is
-// generated by the client on the user's device; ROMarr can only be the box it
+// generated by the client on the user's device; ROMarrNG can only be the box it
 // is typed into, and the copy says so before the input rather than after a
 // failure.
 const moonlightCard=m=>{
   if(!m.configured) return `<div class="card"><h3>Game streaming host</h3>
     <p class="help">${esc(m.hint||'')}. A Moonlight host renders a real
     desktop emulator on the host's GPU and sends video &mdash; which is how
-    machines with no browser core get played. ROMarr reports what it can
+    machines with no browser core get played. ROMarrNG reports what it can
     verify about one and never guesses the rest.</p>
     <p class="help">${esc(m.manual||'')}</p></div>`;
 
   if(!m.ok) return `<div class="card"><h3>${esc(m.kind_label||'Moonlight')}</h3>
     <p class="testline bad">No answer from ${esc(m.host||'')}:${esc(String(m.port||''))}
     &mdash; ${esc(m.problem||'unreachable')}</p>
-    <p class="help">ROMarr probes <code>/serverinfo</code> on the Moonlight
+    <p class="help">ROMarrNG probes <code>/serverinfo</code> on the Moonlight
     port, which needs no credential and no pairing. If that does not answer,
     the host is down, firewalled, or on another port.</p></div>`;
 
@@ -2972,12 +2972,12 @@ const moonlightCard=m=>{
              </tbody></table>`
           : `<p class="help">Its app list was read (${(m.apps||[]).length}
              app${(m.apps||[]).length===1?'':'s'}) and <b>no platform gains a
-             route from it</b>. ROMarr only counts an app whose name is an
+             route from it</b>. ROMarrNG only counts an app whose name is an
              emulator for exactly one machine &mdash; PCSX2, Dolphin, flycast.
              A RetroArch or a Steam proves nothing, because nothing in the API
              says which cores or games are inside it.</p>`)
       : `<p class="help"><b>Reachable, but its app list could not be read</b>,
-         so ROMarr cannot say which platforms it plays and does not guess.
+         so ROMarrNG cannot say which platforms it plays and does not guess.
          ${esc(m.apps_problem||'')}</p>`}
     ${(m.apps||[]).length?`<p class="help">Apps: ${
       (m.apps||[]).map(a=>'<span class="pill">'+esc(a)+'</span>').join(' ')}</p>`:''}
@@ -3005,7 +3005,7 @@ const moonlightCard=m=>{
     <div id="ml-msg" class="testline"></div>
 
     <h4 style="margin:18px 0 6px">Connecting</h4>
-    <p class="help">ROMarr cannot start the stream for you. Launching is
+    <p class="help">ROMarrNG cannot start the stream for you. Launching is
     behind the same paired client certificate as the app list, on the host's
     HTTPS port, and there is no <code>moonlight://</code> link a browser can
     hand off &mdash; Moonlight registers no URL scheme. What does work:</p>
@@ -3029,7 +3029,7 @@ const wireMoonlight=m=>{
     const r=await j('/api/v1/moonlight/pin',{method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({pin:pin,pair_secret:sec})}).catch(()=>({ok:false,
-        detail:'ROMarr could not reach the host'}));
+        detail:'ROMarrNG could not reach the host'}));
     // Never "Paired". Neither Wolf nor Sunshine reports whether the PIN was
     // right on this call -- Sunshine returns true for a wrong PIN whenever a
     // request is outstanding (LizardByte/Sunshine#3944) -- so the strongest
@@ -3064,7 +3064,7 @@ RENDER.platforms=async()=>{
   const rows=await j('/api/platforms').catch(()=>[]);
   const badge=k=>`<span class="pill">${esc(k)}</span>`;
   $('#page').innerHTML=`<div class="card"><h3>Platforms</h3>
-    <p class="help">What ROMarr can request, and how each one plays on this
+    <p class="help">What ROMarrNG can request, and how each one plays on this
       install. Disc platforms are included: nine of them run in the browser on
       a stock RomM, and the rest stream from a stream server.</p>
     <table><thead><tr><th>Platform</th><th>Media</th><th>Plays</th>
@@ -3089,7 +3089,7 @@ RENDER.blocklist=async()=>{
   const when=t=>t?new Date(t*1000).toLocaleString():'—';
   $('#page').innerHTML='<div class="card"><h3>Blocklist '
     +'<span class="help" style="margin-left:8px">'+items.length+'</span></h3>'
-    +'<p class="help">Releases ROMarr will never take again. Each carries the '
+    +'<p class="help">Releases ROMarrNG will never take again. Each carries the '
     +'reason it was blocked, so lifting one is a decision rather than a guess.</p>'
     +(items.length
       ?'<table><thead><tr><th>Release</th><th>Indexer</th><th>Reason</th>'
@@ -3119,7 +3119,7 @@ RENDER.connections=async()=>{
   const have=conns.items||[];
   const types=schema.list||schema.types||[];
   $('#page').innerHTML='<div class="card"><h3>Connections</h3>'
-    +'<p class="help">Where ROMarr tells you what it did. A grab notification '
+    +'<p class="help">Where ROMarrNG tells you what it did. A grab notification '
     +'carries the reasons the release was chosen, not just its name.</p>'
     +(have.length
       ?'<table><thead><tr><th>Name</th><th>Type</th><th>Events</th><th></th></tr></thead><tbody>'
@@ -3182,7 +3182,7 @@ RENDER.metadata=async()=>{
        +'the Calendar stay dark until one is.</div>')
     +'</div>'
     +'<div class="card"><h3>What each provider needs</h3>'
-    +'<p class="help">ROMarr looks a game up by its <b>DAT-verified name</b> when it '
+    +'<p class="help">ROMarrNG looks a game up by its <b>DAT-verified name</b> when it '
     +'has one, and only falls back to parsing the filename when it does not. '
     +'Every result says which was used, because a cover matched from a guess '
     +'deserves less trust than one matched from a hash.</p>'
@@ -3354,7 +3354,7 @@ RENDER.calendar=async()=>{
 };
 
 // Shared by Calendar and Discover: turn a metadata title into a Wanted
-// request, resolving the store's platform names to a ROMarr platform.
+// request, resolving the store's platform names to a ROMarrNG platform.
 async function requestGame(g){
   const names=(g.platforms||[]);
   const match=PLATFORMS.find(p=>names.some(n=>
@@ -3378,11 +3378,11 @@ async function requestGame(g){
 // --- Manual Import ---------------------------------------------------------
 // Radarr calls this Manual Import and it exists for the same reason: somebody
 // arrives with a library already on disk, and telling them to re-download
-// everything ROMarr could have adopted is absurd.
+// everything ROMarrNG could have adopted is absurd.
 RENDER.getstarted=async()=>{
   // The question a capable new self-hoster actually asked: "if I host ROMs,
-  // where do I play them?" ROMarr acquires and files; something else plays.
-  // Saying so plainly beats implying ROMarr is a frontend it is not.
+  // where do I play them?" ROMarrNG acquires and files; something else plays.
+  // Saying so plainly beats implying ROMarrNG is a frontend it is not.
   const [status,libs,plat]=await Promise.all([
     j('/api/v1/system/status').catch(()=>({})),
     j('/api/v1/library').catch(()=>({items:[]})),
@@ -3417,12 +3417,12 @@ RENDER.getstarted=async()=>{
      +'<td class="help" style="margin:0">'+what+'</td></tr>':'';
 
   $('#page').innerHTML=
-    '<div class="card"><h3>What ROMarr is</h3>'
-    +'<p class="help">ROMarr is the acquisition and automation layer: it '
+    '<div class="card"><h3>What ROMarrNG is</h3>'
+    +'<p class="help">ROMarrNG is the acquisition and automation layer: it '
     +'searches your indexers, grabs the best release, checks it against a '
     +'No-Intro or Redump DAT, and files it into your library. '
     +'<b>It is not an emulator and not a game launcher.</b> Something else '
-    +'plays the ROM — ROMarr makes sure the right file is in the right place '
+    +'plays the ROM — ROMarrNG makes sure the right file is in the right place '
     +'for it.</p>'
     +'<div style="font-family:ui-monospace,monospace;font-size:12.5px;'
     +'background:var(--bg);border:1px solid var(--line);border-radius:6px;'
@@ -3430,7 +3430,7 @@ RENDER.getstarted=async()=>{
     +'<b>Acquire</b> → <b>Verify</b> → <b>File</b> → <b>Scan</b> → <b>Play</b><br>'
     +'<span style="color:var(--dim)">indexers &nbsp; DAT hashes &nbsp; '
     +'library root &nbsp; library server &nbsp; a frontend</span><br>'
-    +'<span style="color:var(--dim)">└─ ROMarr does the first four ─┘ &nbsp; '
+    +'<span style="color:var(--dim)">└─ ROMarrNG does the first four ─┘ &nbsp; '
     +'└ you choose this ┘</span>'
     +'</div></div>'
 
@@ -3446,23 +3446,23 @@ RENDER.getstarted=async()=>{
        +'a plain folder that Batocera, ES-DE, EmuDeck or LaunchBox reads. '
        +'Set under <a href="#libraries">Libraries</a>.')
     +step(4,'DATs (optional, recommended)',datOk,
-       'No-Intro and Redump checksums. With them ROMarr can say a file is the '
+       'No-Intro and Redump checksums. With them ROMarrNG can say a file is the '
        +'exact known-good dump rather than merely the right size — and '
        +'<a href="#collections">Collections</a> can tell you what a complete '
        +'set is missing.')
     +'</div>'
 
     +'<div class="card" style="margin-top:16px"><h3>Where you actually play</h3>'
-    +'<p class="help">ROMarr files the ROM; one of these runs it. You do not '
+    +'<p class="help">ROMarrNG files the ROM; one of these runs it. You do not '
     +'need all of them — one is enough.</p>'
     +'<table><thead><tr><th>If your library is</th><th>You play in</th></tr></thead><tbody>'
     +'<tr><td>RomM</td><td>RomM\'s built-in EmulatorJS, in the browser</td></tr>'
     +'<tr><td>Gaseous or Retrom</td><td>Their own web players and clients</td></tr>'
     +'<tr><td>A folder</td><td>Batocera, RetroPie, Recalbox, ES-DE, EmuDeck, '
     +'Lakka, muOS, LaunchBox or Playnite — they all read a per-platform '
-    +'directory, which is exactly what ROMarr writes</td></tr>'
+    +'directory, which is exactly what ROMarrNG writes</td></tr>'
     +'</tbody></table>'
-    +'<p class="help">ROMarr can also export your library as LaunchBox XML, an '
+    +'<p class="help">ROMarrNG can also export your library as LaunchBox XML, an '
     +'ES-DE <code>gamelist.xml</code> or Playnite JSON — see '
     +'<a href="#status">System</a>.</p>'
     +(Object.keys(counts).length
@@ -3475,7 +3475,7 @@ RENDER.getstarted=async()=>{
           'Too heavy for the browser; rendered by a headless RetroArch and '
           +'streamed to you.')
        +routeRow('download','Download only',
-          'ROMarr fetches and verifies it; you play it in a native emulator.')
+          'ROMarrNG fetches and verifies it; you play it in a native emulator.')
        +'</tbody></table>':'')
     +'</div>'
 
@@ -3646,7 +3646,7 @@ RENDER.collections=async()=>{
 
 RENDER.manualimport=async()=>{
   $('#page').innerHTML='<div class="card"><h3>Manual Import</h3>'
-    +'<p class="help">Point ROMarr at a directory you already have. It works out '
+    +'<p class="help">Point ROMarrNG at a directory you already have. It works out '
     +'which platform each file belongs to and verifies against your DATs, then '
     +'you choose what to adopt.</p>'
     +'<div class="row"><input id="mipath" placeholder="/downloads/roms" '
@@ -3697,7 +3697,7 @@ RENDER.manualimport=async()=>{
       btn.onclick=()=>{
         if(confirm('This file did not match a known dump.\n\n'
           +'Import it anyway? It will be recorded as a forced import, and '
-          +'ROMarr will not claim it is verified.')) adopt(row,true);
+          +'ROMarrNG will not claim it is verified.')) adopt(row,true);
       };
     }
   }
@@ -3725,7 +3725,7 @@ RENDER.manualimport=async()=>{
            +'<td class="mi-st help" style="margin:0"></td></tr>').join('')
          +'</tbody></table>'
         :'<div class="empty-cat"><b>Nothing importable there</b>'
-         +'Check the path, or that the files carry extensions ROMarr knows.</div>');
+         +'Check the path, or that the files carry extensions ROMarrNG knows.</div>');
 
     out.querySelectorAll('tbody tr').forEach(row=>{
       const btn=row.querySelector('.mi-go');
@@ -3890,7 +3890,7 @@ async function refreshCounts(){
 
 def page() -> str:
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<title>ROMarr</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ROMarrNG</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>{CSS}</style><script>{THEME_BOOT}</script></head><body>
 <nav id="rail"><div id="brand">ROM<span>arr</span></div>
 <div id="navwrap">{_nav_html()}</div>
@@ -3994,13 +3994,13 @@ def login_page(*, claimed: bool, totp: bool = False) -> str:
   <label for="confirm">Confirm password</label>
   <input id="confirm" type="password" autocomplete="new-password" minlength="8">
 """
-        note = ("Nobody has claimed this ROMarr yet, so this screen is open. "
+        note = ("Nobody has claimed this ROMarrNG yet, so this screen is open. "
                 "Set the password now. To skip this step on future installs, "
                 "put <code>ROMARR_PASSWORD</code> in your container "
                 "environment.")
 
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<title>{title} &middot; ROMarr</title>
+<title>{title} &middot; ROMarrNG</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>{CSS}{LOGIN_CSS}</style><script>{THEME_BOOT}</script></head><body>
 <form class="box" id="f" autocomplete="on">
@@ -4051,21 +4051,21 @@ f.onsubmit = async function(e) {{
     var d = {{}};
     try {{ d = await r.json(); }} catch (_) {{}}
     fail(d.detail || d.error || ('Refused (HTTP ' + r.status + ').'));
-  }} catch (_) {{ fail('Could not reach ROMarr.'); }}
+  }} catch (_) {{ fail('Could not reach ROMarrNG.'); }}
 }};
 </script></body></html>"""
 
 
 # ------------------------------------------------------ the invitation link --
 #
-# Where a peering invitation lands, and the one page in ROMarr written for
+# Where a peering invitation lands, and the one page in ROMarrNG written for
 # somebody who does not have an account here.
 #
 # Alice sends Bob a link. Bob clicks it and his browser goes to ALICE'S server,
 # because Alice's address is the only address Alice knows. That is the whole
 # difficulty with a Plex-style link in a system with no central anything:
 # plex.tv/link works because plex.tv exists, and nothing here is allowed to. So
-# this page's job is to hand Bob back to his own ROMarr, which it does by
+# this page's job is to hand Bob back to his own ROMarrNG, which it does by
 # rewriting the same path and the same fragment onto the host he types once.
 #
 # The invariant that lets the page know which of the two servers it is running
@@ -4140,7 +4140,7 @@ function home() {
 }
 
 /* Away. This is the inviter's server. Ask for the recipient's own address and
-   rewrite the same link onto it, carrying this origin in `u` so their ROMarr
+   rewrite the same link onto it, carrying this origin in `u` so their ROMarrNG
    knows who invited them. Remembered locally, because the second invitation
    somebody receives should not ask twice. */
 function away() {
@@ -4152,18 +4152,18 @@ function away() {
     + '<div class="sub">You have been invited to peer</div>'
     + '<div class="who">' + esc(f.n || here) + '</div>'
     + '<div class="id">' + esc(here) + '</div>'
-    + '<div class="step"><b>1</b><span>Tell ROMarr where your own server '
+    + '<div class="step"><b>1</b><span>Tell ROMarrNG where your own server '
     + 'lives. This page is on your friend&rsquo;s server, so it has to send '
     + 'you home.</span></div>'
-    + '<label for="home">Your ROMarr address</label>'
+    + '<label for="home">Your ROMarrNG address</label>'
     + '<input id="home" type="url" placeholder="http://192.168.1.20:7878" '
     + 'value="' + esc(mine) + '" autofocus>'
-    + '<button id="go">Open this invitation on my ROMarr</button>'
-    + '<div class="step"><b>2</b><span>Your ROMarr will ask for the '
+    + '<button id="go">Open this invitation on my ROMarrNG</button>'
+    + '<div class="step"><b>2</b><span>Your ROMarrNG will ask for the '
     + '<b>claim code</b> &mdash; eight characters your friend sends you '
     + 'separately. It is deliberately not in this link, and it expires in '
     + '15 minutes.</span></div>'
-    + '<div class="note">No ROMarr on this device? Copy the link and paste it '
+    + '<div class="note">No ROMarrNG on this device? Copy the link and paste it '
     + 'into <b>Friends &rarr; I have an invitation</b> on your own server.'
     + '<br><br><code>' + esc(link) + '</code>'
     + '<button class="copy" id="copy">Copy the link</button></div>';
@@ -4205,7 +4205,7 @@ def link_page() -> str:
     to learn from a header.
     """
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<title>Invitation &middot; ROMarr</title>
+<title>Invitation &middot; ROMarrNG</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <style>{CSS}{LOGIN_CSS}{LINK_CSS}</style></head><body>

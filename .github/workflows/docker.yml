@@ -56,7 +56,7 @@ jobs:
         with:
           # Lowercase literal: GHCR rejects uppercase, and the repository owner
           # is spelled with capitals.
-          images: ghcr.io/blizzhacker/romarr
+          images: ghcr.io/snapetech/romarrng
           # These are passed to the build as `labels:` below, which means they
           # are applied *after* the Dockerfile's own LABEL and win. Left to its
           # defaults this action titles the image `romarr` from the repository
@@ -64,8 +64,8 @@ jobs:
           # Dockerfile's labels were dead and every registry showed the brand
           # in lowercase.
           labels: |
-            org.opencontainers.image.title=ROMarr
-            org.opencontainers.image.description=The *arr for games: request a ROM, ROMarr finds it via Prowlarr, grabs it, and files it into your game library
+            org.opencontainers.image.title=ROMarrNG
+            org.opencontainers.image.description=The *arr for games: request a ROM, ROMarrNG finds it via Prowlarr, tracks SeerrNG requests, and streams verified imported files
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}

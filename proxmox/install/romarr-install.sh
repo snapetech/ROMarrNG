@@ -3,7 +3,7 @@
 # Copyright (c) 2021-2026 community-scripts ORG
 # Author: BlizzHacker
 # License: MIT | https://github.com/community-scripts/ProxmoxVED/raw/main/LICENSE
-# Source: https://github.com/BlizzHacker/romarr
+# Source: https://github.com/snapetech/ROMarrNG
 
 source /dev/stdin <<<"$FUNCTIONS_FILE_PATH"
 color
@@ -20,9 +20,9 @@ msg_info "Installing Dependencies"
 $STD apt-get install -y python3-venv libarchive-tools
 msg_ok "Installed Dependencies"
 
-fetch_and_deploy_gh_release "romarr" "BlizzHacker/romarr" "tarball" "latest" "/opt/romarr"
+fetch_and_deploy_gh_release "romarr" "snapetech/ROMarrNG" "tarball" "latest" "/opt/romarr"
 
-# Refuse to leave an unauthenticated ROMarr on somebody's network.
+# Refuse to leave an unauthenticated ROMarrNG on somebody's network.
 #
 # "latest" is whatever tag exists, and the published release can lag main by a
 # long way: v0.7.0 was tagged before authentication existed at all, so a
@@ -31,17 +31,17 @@ fetch_and_deploy_gh_release "romarr" "BlizzHacker/romarr" "tarball" "latest" "/o
 # script cannot fall back to main the way ct/romarr.sh does -- the framework
 # owns the fetch -- so it stops instead of finishing quietly.
 if [[ ! -f /opt/romarr/romarr/auth.py ]]; then
-  msg_error "The published release has no romarr/auth.py -- it predates authentication. Install from https://github.com/BlizzHacker/romarr/blob/main/proxmox/ct/romarr.sh instead, which falls back to main."
+  msg_error "The published release has no romarr/auth.py -- it predates authentication. Install from https://github.com/snapetech/ROMarrNG/blob/main/proxmox/ct/romarr.sh instead, which falls back to main."
   exit 1
 fi
 
-msg_info "Setting up ROMarr"
+msg_info "Setting up ROMarrNG"
 cd /opt/romarr
 $STD python3 -m venv .venv
 $STD /opt/romarr/.venv/bin/pip install --upgrade pip
 $STD /opt/romarr/.venv/bin/pip install -r requirements.txt
 
-# ROMarr talks to three services and stores nothing else. Every value here is
+# ROMarrNG talks to three services and stores nothing else. Every value here is
 # blank on purpose: it starts and serves its UI with none of them reachable,
 # and the Settings pages say which are missing, so a first run is never a blank
 # failure. Blank rather than a plausible-looking 192.168.1.100 -- an address
@@ -76,12 +76,12 @@ LOG_LEVEL=INFO
 EOF
 chmod 600 /opt/romarr/.env
 mkdir -p /mnt/roms /opt/romarr/backends
-msg_ok "Set up ROMarr"
+msg_ok "Set up ROMarrNG"
 
 msg_info "Creating Service"
 cat <<EOF >/etc/systemd/system/romarr.service
 [Unit]
-Description=ROMarr - the *arr for games
+Description=ROMarrNG - the *arr for games
 After=network-online.target
 Wants=network-online.target
 

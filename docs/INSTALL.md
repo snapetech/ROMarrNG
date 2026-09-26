@@ -1,4 +1,10 @@
-# Installing ROMarr
+# Installing ROMarrNG
+
+ROMarrNG is a maintained fork of [ROMarr](https://github.com/BlizzHacker/romarr)
+for SeerrNG's durable request and artifact-delivery integration. The NG
+integration endpoints are specific to this fork; upstream ROMarr does not
+implement them. Use this repository and its GHCR package when installing
+ROMarrNG.
 
 Everything needed to go from nothing to a working install, without reading
 source. If a step here needs knowledge that is not on this page, that is a bug
@@ -9,7 +15,7 @@ works, it was run. Where it has never been run, it says so.
 
 ## Contents
 
-- [What ROMarr needs](#what-romarr-needs)
+- [What ROMarrNG needs](#what-romarrng-needs)
 - [Docker, in one command](#docker-in-one-command)
 - [Docker Compose](#docker-compose) ← start here for a real install
 - [Proxmox LXC](#proxmox-lxc)
@@ -27,21 +33,21 @@ works, it was run. Where it has never been run, it says so.
 
 ---
 
-## What ROMarr needs
+## What ROMarrNG needs
 
-ROMarr does not store a library, run an emulator or index anything itself. It
+ROMarrNG does not store a library, run an emulator or index anything itself. It
 sits between three things you already run:
 
 | | What it does | Required? |
 |---|---|---|
-| **An indexer** — Prowlarr, or a Torznab/Newznab URL, or a torrent RSS feed | Finds releases | To search for anything. Without it ROMarr runs and finds nothing. |
+| **An indexer** — Prowlarr, or a Torznab/Newznab URL, or a torrent RSS feed | Finds releases | To search for anything. Without it ROMarrNG runs and finds nothing. |
 | **A download client** — any of the [26 below](#download-clients), plus a plain-HTTP and a headless-browser lane for ROM sites | Fetches the release | To grab anything. A release found with no client that speaks its protocol is ranked and then refused. |
 | **A game library** — RomM, Gaseous, Retrom, or just a directory | Receives the ROM | `folder` needs nothing but a path, so effectively no. |
 
 Everything else — DAT verification, import lists, streaming hosts, the browser
 players, plugins — is optional and off until configured.
 
-**ROMarr starts and serves its UI with none of the three reachable.** The
+**ROMarrNG starts and serves its UI with none of the three reachable.** The
 Settings pages name what is missing. A first run is never a blank failure, so
 it is fine to start it before the rest of the stack is ready.
 
@@ -49,7 +55,7 @@ it is fine to start it before the rest of the stack is ready.
 
 - A port. Default **6868**. (It was 7878 before 0.7 — that is Radarr's, and
   running both is the normal case.)
-- Two paths that must agree with things outside ROMarr:
+- Two paths that must agree with things outside ROMarrNG:
   - your **library root**, which your library server also has to scan;
   - your **download client's completed directory**, at the path *the client
     reports*.
@@ -69,14 +75,14 @@ docker run -d --name romarr \
   -p 6868:6868 \
   -e PUID=1000 -e PGID=1000 -e UMASK=002 -e TZ=Etc/UTC \
   -v /srv/romarr/config:/config \
-  ghcr.io/blizzhacker/romarr:latest
+  ghcr.io/snapetech/romarrng:latest
 ```
 
 Open <http://localhost:6868> and set a password.
 
 Two details that are easy to get wrong and cost an afternoon:
 
-- **`--restart unless-stopped` is not optional.** Without it ROMarr does not
+- **`--restart unless-stopped` is not optional.** Without it ROMarrNG does not
   come back after a host reboot, and the first sign is a week of missed
   scheduled searches.
 - **Use an absolute path for `/config`.** `-v ./config:/config` works on Docker
@@ -94,7 +100,7 @@ The recommended install.
 
 ```bash
 mkdir -p /srv/romarr && cd /srv/romarr
-curl -O https://raw.githubusercontent.com/BlizzHacker/romarr/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/snapetech/ROMarrNG/main/docker-compose.yml
 ```
 
 Create a `.env` beside it with your two host paths:
@@ -108,7 +114,7 @@ Then:
 
 ```bash
 docker compose up -d
-docker compose logs -f      # ctrl-C when you see "ROMarr listening on"
+docker compose logs -f      # ctrl-C when you see "ROMarrNG listening on"
 ```
 
 Open <http://localhost:6868>.
@@ -136,7 +142,7 @@ That is the intended behaviour, not a broken file.
 ### The downloads path, specifically
 
 Left side of the mount is the host. **The right side must be the path your
-download client reports, character for character.** ROMarr asks the client
+download client reports, character for character.** ROMarrNG asks the client
 where a finished download is and then opens that path itself, so the two have
 to agree.
 
@@ -146,7 +152,7 @@ to agree.
   paths, so both sides are identical: `- /mnt/downloads:/mnt/downloads`
 
 Where to look it up: qBittorrent → *Options → Downloads → Save path*.
-SABnzbd → *Config → Folders → Completed Download Folder*. ROMarr uses whatever
+SABnzbd → *Config → Folders → Completed Download Folder*. ROMarrNG uses whatever
 the client's API returns, which is that setting.
 
 If the two genuinely cannot be made to match — a client on another machine —
@@ -160,18 +166,18 @@ Management*:
 ```
 
 Longest matching prefix wins, and the log records both the path the client
-reported and what ROMarr resolved it to.
+reported and what ROMarrNG resolved it to.
 
 ### PUID / PGID / UMASK
 
-ROMarr writes ROM files that another application has to read. Set these to the
+ROMarrNG writes ROM files that another application has to read. Set these to the
 same user your library server runs as (`id -u` / `id -g`), or those files land
 owned by root and your library either cannot read them or has to run as root
 too.
 
 Use the host's **numeric** IDs. For example, if `id media` reports UID `1028`
 and GID `1009`, set `PUID=1028` and `PGID=1009`; setting `PGID=1010` makes new
-ROMarr files group `1010`. `UMASK=002` is the default, producing files with
+ROMarrNG files group `1010`. `UMASK=002` is the default, producing files with
 mode `0664` and directories with mode `0775` so that group can use them. A
 stricter value such as `022` is supported.
 
@@ -180,10 +186,10 @@ they can be multiple terabytes on a NAS, a recursive chown at every boot would
 take hours, and the ownership there is one you chose on purpose.
 
 Because a bind mount exposes the same inode on both sides, an existing download
-must retain the same numeric owner, group and mode before and after ROMarr
+must retain the same numeric owner, group and mode before and after ROMarrNG
 starts. The image smoke test verifies that invariant. User-namespace or NAS
 ID mapping can display different IDs inside a container; in that case align the
-Docker/Unraid mapping as well as `PUID`/`PGID`. ROMarr does not try to repair a
+Docker/Unraid mapping as well as `PUID`/`PGID`. ROMarrNG does not try to repair a
 download by changing it.
 
 If you run the container with `--user`, rootless Docker, Podman userns, or
@@ -224,10 +230,10 @@ board is worth more than another CI build.
 On a Proxmox VE host, as root:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/BlizzHacker/romarr/main/proxmox/ct/romarr.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/snapetech/ROMarrNG/main/proxmox/ct/romarr.sh)"
 ```
 
-It creates an unprivileged Debian 13 container, installs ROMarr into
+It creates an unprivileged Debian 13 container, installs ROMarrNG into
 `/opt/romarr` with a virtualenv, writes a systemd unit, starts it, and then
 **waits for `/api/health` to answer before claiming success**. If it does not
 answer, the script fails and tells you which `journalctl` to read.
@@ -251,7 +257,7 @@ CTID=123 DISK=8 RAM=1024 ROM_PATH=/mnt/roms \
 | `UNPRIVILEGED` | `1` | |
 | `ROM_PATH` | `/mnt/roms` | Also added to the unit's `ReadWritePaths` |
 | `APP_PORT` | `6868` | |
-| `REPO` | `BlizzHacker/romarr` | For forks |
+| `REPO` | `snapetech/ROMarrNG` | For forks |
 
 The script is deliberately self-contained. It used to source community-scripts'
 `build.func`, which then fetched `install/<app>.sh` from *their* repository —
@@ -284,7 +290,7 @@ systemctl restart romarr
 
 State is `/opt/romarr/romarr.json`. Logs are `journalctl -u romarr -f`.
 
-**ROMarr runs as root inside that container.** The unit confines it —
+**ROMarrNG runs as root inside that container.** The unit confines it —
 `NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=strict`, `ProtectHome`, and
 `ReadWritePaths` limited to `/opt/romarr` and your ROM path — but there is no
 unprivileged service user, so imported ROMs are written root-owned (mode 644,
@@ -296,9 +302,9 @@ with `root_squash`, that is the thing to know.
 ## Home Assistant
 
 *Settings → Add-ons → Add-on Store → ⋮ → Repositories*, add
-`https://github.com/BlizzHacker/romarr`, install **ROMarr**.
+`https://github.com/snapetech/ROMarrNG`, install **ROMarrNG**.
 
-It runs the same image Docker users run — ROMarr reads Home Assistant's
+It runs the same image Docker users run — ROMarrNG reads Home Assistant's
 `/data/options.json` natively, so there is no add-on-specific build and no
 drift between the two. Every option key is upper-cased into an environment
 variable (`prowlarr_url` → `PROWLARR_URL`), which means anything in the
@@ -316,7 +322,7 @@ them.
 Python 3.11 or newer. Dependencies are `requests` plus, on Linux, `pyseccomp`.
 
 ```bash
-git clone https://github.com/BlizzHacker/romarr.git && cd romarr
+git clone https://github.com/snapetech/ROMarrNG.git && cd ROMarrNG
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env          # edit it
@@ -336,7 +342,7 @@ almost entirely as `.7z`, and busybox/GNU `tar` is not a substitute.
 
 ## First run: claiming the install
 
-ROMarr requires a credential. There is no open mode you can fall into by
+ROMarrNG requires a credential. There is no open mode you can fall into by
 forgetting to configure something.
 
 A fresh install is **unclaimed**. The first visit to the web UI asks you to set
@@ -406,7 +412,7 @@ Measured, not assumed: with a state file already written, starting the
 container with `QBITTORRENT_URL`, `PROWLARR_URL` and `LIBRARY_PATH` all changed
 to new values, `/api/v1/system/status` still reported the originals.
 
-Once ROMarr has run once, change these on the **Settings** pages:
+Once ROMarrNG has run once, change these on the **Settings** pages:
 
 - download clients, indexers and libraries → *Settings → Download Clients /
   Indexers / Libraries*
@@ -421,16 +427,16 @@ environment at any time:
 `DAT_PATH`, the `MOONLIGHT_*` and `WOLF_*` set, `STREAM_SERVER_URL`,
 `GGREQUESTZ_URL`, `PUID`, `PGID`, `UMASK`, `TZ`.
 
-ROMarr does tell you about this in the one case where it can be certain: if
+ROMarrNG does tell you about this in the one case where it can be certain: if
 the stored library path does not exist but the one in the environment does, the
 status page says so and names the Settings page as the fix.
 
 ### Connect GG Requestz
 
-Request delivery is configured on the **GG Requestz side**. ROMarr's
+Request delivery is configured on the **GG Requestz side**. ROMarrNG's
 `GGREQUESTZ_URL` only adds and checks the link shown on the System page; it does
 not tell GG Requestz where to send anything. Open **System → GG Requestz
-requests** in ROMarr to build the value, then add it to the GG Requestz
+requests** in ROMarrNG to build the value, then add it to the GG Requestz
 container and restart that container:
 
 ```env
@@ -444,7 +450,7 @@ container, not merely from a browser.
 
 GG Requestz 1.5+ sends the event only after the request is approved. Turn on
 `request.auto_approve` if requests should flow immediately, or approve each one
-in GG Requestz. The receiver is ROMarr itself; the `rom-hub webhook` commands
+in GG Requestz. The receiver is ROMarrNG itself; the `rom-hub webhook` commands
 described for a standalone ROM Hub are not installed or needed in this image.
 
 The query parameter is a credential because GG Requestz cannot attach an API
@@ -454,7 +460,7 @@ key header. Keep it private and use a trusted Docker network or HTTPS.
 
 ## Configuration reference
 
-Every variable ROMarr reads. "Seeded" means first-run only — see
+Every variable ROMarrNG reads. "Seeded" means first-run only — see
 [the rule above](#the-rule-that-catches-everyone).
 
 ### Core
@@ -462,7 +468,7 @@ Every variable ROMarr reads. "Seeded" means first-run only — see
 | Variable | Default | If it is wrong |
 |---|---|---|
 | `ROMARR_PORT` | `6868` | Nothing listens where you expect. Change the published port to match. |
-| `ROMARR_DATA` | `/opt/romarr/romarr.json` (`/config/romarr.json` in Docker) | Points at a new file → a fresh, unclaimed install with a new API key. Points at an unreadable file → **ROMarr refuses to start** and says so, rather than overwriting it. |
+| `ROMARR_DATA` | `/opt/romarr/romarr.json` (`/config/romarr.json` in Docker) | Points at a new file → a fresh, unclaimed install with a new API key. Points at an unreadable file → **ROMarrNG refuses to start** and says so, rather than overwriting it. |
 | `LOG_LEVEL` | `INFO` | `DEBUG` for the full request trace. |
 | `PUID` / `PGID` | `1000` / `1000` | Imported ROMs are owned by the wrong user; your library server may not be able to read them. Docker only. |
 | `UMASK` | `002` | New files are not group-writable. Three or four octal digits; Docker only. Existing downloads are never rewritten. |
@@ -481,7 +487,7 @@ Every variable ROMarr reads. "Seeded" means first-run only — see
 | `ROMARR_SSO_PROVIDER` | `authentik` | Also `authelia`, `cloudflare`, `oauth2-proxy`. |
 | `ROMARR_SSO_USER_HEADER` / `_GROUPS_HEADER` | per provider | Override the provider's defaults. |
 | `ROMARR_SSO_GROUP` | unset | Require membership of this group. |
-| `ROMARR_SSL_CERT` / `ROMARR_SSL_KEY` | unset | Serve HTTPS directly. If the pair cannot be loaded ROMarr logs the error and continues on plain HTTP — check the log rather than assuming TLS is on. |
+| `ROMARR_SSL_CERT` / `ROMARR_SSL_KEY` | unset | Serve HTTPS directly. If the pair cannot be loaded ROMarrNG logs the error and continues on plain HTTP — check the log rather than assuming TLS is on. |
 
 ### Indexer
 
@@ -512,16 +518,16 @@ BitTorrent, porla, Vuze, BiglyBT.
 
 **Debrid and cloud** — Real-Debrid, AllDebrid, Premiumize, TorBox,
 Debrid-Link, Offcloud, put.io, Linksnappy. These do not run on your hardware:
-the service fetches the release, ROMarr downloads the result into that
-client's **Save Path**, and the importer reads it from there. Only what ROMarr
+the service fetches the release, ROMarrNG downloads the result into that
+client's **Save Path**, and the importer reads it from there. Only what ROMarrNG
 itself sent is ever touched — none of these services has a category to filter
-on, so ROMarr keeps a dotfile of its own item ids beside the downloads. Give
+on, so ROMarrNG keeps a dotfile of its own item ids beside the downloads. Give
 each one its own Save Path if you run more than one.
 
 **Usenet** — SABnzbd, NZBGet, NZBVortex.
 
 **Blackholes** — Torrent Blackhole and Usenet Blackhole. No API and nothing to
-connect to: ROMarr writes the `.torrent` or `.nzb` into a folder your client
+connect to: ROMarrNG writes the `.torrent` or `.nzb` into a folder your client
 watches, and reads what it finished out of another. That is how you use a
 client this list does not name. Two things to know — a magnet is written as a
 one-line `.magnet` file, which not every client reads, and nothing announces
@@ -533,11 +539,11 @@ Notes on three of them:
 - **Vuze and BiglyBT** speak the Transmission RPC through a plugin that is not
   installed by default. Vuze itself is no longer developed; BiglyBT is the
   fork that is.
-- **uTorrent** cannot label a torrent added by URL, so ROMarr sets the label
+- **uTorrent** cannot label a torrent added by URL, so ROMarrNG sets the label
   afterwards using the magnet's own infohash. A release grabbed as a
   `.torrent` link has no hash to use and lands unlabelled.
 - **Freebox Download** needs an App Token, which is issued once after somebody
-  authorises the app on the front panel of the box. ROMarr cannot do that part.
+  authorises the app on the front panel of the box. ROMarrNG cannot do that part.
 
 **Tixati is not offered**, and will not be: it has no API at all. Its web
 interface is HTML forms, and reading its transfer list means regex-scraping a
@@ -545,7 +551,7 @@ page that is free to change with any release. Use the Torrent Blackhole with
 Tixati's own watch directory instead.
 
 The category does **not** have to exist in the client first — SABnzbd keeps an
-undefined one verbatim and ROMarr still matches it. Define it there anyway if
+undefined one verbatim and ROMarrNG still matches it. Define it there anyway if
 you want its own folder or a post-processing script.
 
 If a protocol has no client, releases of that protocol are ranked and then
@@ -557,9 +563,9 @@ refused. The Download Clients page names any protocol left uncovered.
 |---|---|---|
 | `LIBRARY_KIND` | `romm` | Also `gaseous`, `retrom`, `folder`. |
 | `LIBRARY_URL` | unset | *Seeded.* Required except for `folder`. |
-| `LIBRARY_USERNAME` / `LIBRARY_PASSWORD` | unset | *Seeded.* Use a **dedicated** account, not your admin one — ROMarr only reads the library and triggers a rescan. |
+| `LIBRARY_USERNAME` / `LIBRARY_PASSWORD` | unset | *Seeded.* Use a **dedicated** account, not your admin one — ROMarrNG only reads the library and triggers a rescan. |
 | `LIBRARY_API_KEY` | unset | *Seeded.* Alternative to username/password. |
-| `LIBRARY_PATH` | `/mnt/roms` | *Seeded.* The library root **as ROMarr sees it** — `/roms` in Docker. Wrong, and imports either fail or land where nothing scans. |
+| `LIBRARY_PATH` | `/mnt/roms` | *Seeded.* The library root **as ROMarrNG sees it** — `/roms` in Docker. Wrong, and imports either fail or land where nothing scans. |
 | `DAT_PATH` | unset | A directory of No-Intro/Redump DATs. Point it at a directory holding **only** DATs. Pointed at a ROM library it used to hang startup for ten minutes; it now scans three levels deep, stops after 40,000 files, and says on the status page that it stopped early — which is a warning, not a working configuration. |
 
 The older `ROMM_URL`, `ROMM_USERNAME`, `ROMM_PASSWORD`, `ROMM_API_TOKEN` and
@@ -571,15 +577,15 @@ Do not set both names for the same thing — the new one wins.
 | Variable | Default | |
 |---|---|---|
 | `GGREQUESTZ_URL` | unset | Request front-end, shown on the System page |
-| `STREAM_SERVER_URL` | unset | Headless RetroArch. Read-only: ROMarr asks which platforms it can play, and reports PS2/GameCube/Wii/Dreamcast/3DS as playable instead of download-only |
+| `STREAM_SERVER_URL` | unset | Headless RetroArch. Read-only: ROMarrNG asks which platforms it can play, and reports PS2/GameCube/Wii/Dreamcast/3DS as playable instead of download-only |
 | `MOONLIGHT_HOST` | unset | A Wolf, Sunshine or Steam Headless machine, e.g. `192.168.0.50` |
 | `MOONLIGHT_KIND` | `wolf` | Also `sunshine`, `steam-headless`. Not sniffed — `/serverinfo` cannot tell them apart |
 | `MOONLIGHT_USER` / `MOONLIGHT_PASS` | unset | Sunshine/Steam Headless admin credentials. Never written to the state file |
 | `WOLF_SOCKET_PATH` / `WOLF_API_URL` | unset | Wolf's API is a UNIX socket — mount `wolf.sock`, or use the nginx proxy Wolf's own docs describe |
 | `STEAM_HEADLESS_URL` | unset | The container's noVNC/neko desktop, surfaced as a link |
 | `ROMARR_PLAYERS` | all four | `emulatorjs,ruffle,jsdos,emularity`, best first. `none` turns every browser route off. Empty means all four, not none |
-| `ROMARR_JSDOS_URL` / `ROMARR_EMULARITY_URL` | unset | Where your own js-dos and Emularity live. Without one, ROMarr reports that the player *would* run a file and names the setting that would let it link there |
-| `ROMARR_PUBLIC_URL` / `ROMARR_PEER_NAME` | unset / `ROMarr` | How a friend's server reaches this one. Peering is the only feature that needs ROMarr to know its own address |
+| `ROMARR_JSDOS_URL` / `ROMARR_EMULARITY_URL` | unset | Where your own js-dos and Emularity live. Without one, ROMarrNG reports that the player *would* run a file and names the setting that would let it link there |
+| `ROMARR_PUBLIC_URL` / `ROMARR_PEER_NAME` | unset / `ROMarrNG` | How a friend's server reaches this one. Peering is the only feature that needs ROMarrNG to know its own address |
 
 ---
 
@@ -601,7 +607,7 @@ leave truncated JSON that will not start.
 ### The ownership trap
 
 If that file ends up owned by a user the container does not run as — an install
-that once ran without `PUID`, or a backup restored with `cp` as root — ROMarr
+that once ran without `PUID`, or a backup restored with `cp` as root — ROMarrNG
 cannot read it.
 
 Older versions responded by starting from defaults and then saving over it: the
@@ -618,7 +624,7 @@ refuses to start on an unreadable state file however it was launched, saying:
 This file holds the API key, the password hash and the request history;
 starting from defaults would overwrite it and leave the install unclaimed.
 Fix the ownership or permissions -- in Docker, PUID/PGID must own /config and
-everything inside it -- and start ROMarr again.
+everything inside it -- and start ROMarrNG again.
 ```
 
 A file that is *unparseable* rather than unreadable still starts from defaults,
@@ -630,7 +636,7 @@ because there is nothing left in it to preserve.
 
 Two things, and only one of them is subtle.
 
-**1. The state file.** Copy it while ROMarr is stopped, or accept that a copy
+**1. The state file.** Copy it while ROMarrNG is stopped, or accept that a copy
 taken mid-write is a copy of the previous version (writes are atomic, so it is
 never a torn file).
 
@@ -691,14 +697,14 @@ If you track `latest`, that is main — every push that passed the suite. An
 image pulled at a bad moment is rolled back the same way as anything else, see
 below.
 
-Running Watchtower or similar? It will update ROMarr whenever `latest` moves.
+Running Watchtower or similar? It will update ROMarrNG whenever `latest` moves.
 That is a defensible choice for a service on your own LAN and a bad one if you
 need to know what changed; pin a `sha-` tag if you would rather decide.
 
 ### Proxmox LXC
 
 ```bash
-pct exec <ctid> -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/BlizzHacker/romarr/main/proxmox/ct/update.sh)"
+pct exec <ctid> -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/snapetech/ROMarrNG/main/proxmox/ct/update.sh)"
 ```
 
 or the same `bash -c "$(curl ...)"` from inside the container.
@@ -729,7 +735,7 @@ pinned:
 
 ```bash
 docker compose down
-# in docker-compose.yml:  image: ghcr.io/blizzhacker/romarr:sha-5cb6a75
+# in docker-compose.yml:  image: ghcr.io/snapetech/romarrng:sha-5cb6a75
 docker compose up -d
 ```
 
@@ -782,11 +788,11 @@ somebody running it.
 | What you see | What it is | Fix |
 |---|---|---|
 | Editing a URL in compose changes nothing | The environment seeds on first run only. | Change it on the Settings page. [Explained above](#the-rule-that-catches-everyone). |
-| `ROM library: Not available /mnt/roms` | Either the volume is mounted somewhere else, or a path stored on first run outranks the environment. | ROMarr distinguishes these on the status page and names which one it is. If the stored path is the problem, fix it in *Settings → Media Management*. |
-| `Download path does not exist` while the file is plainly there | The client reports a path ROMarr cannot see. | Make the container-side download path match what the client reports, or add a remote path mapping. |
+| `ROM library: Not available /mnt/roms` | Either the volume is mounted somewhere else, or a path stored on first run outranks the environment. | ROMarrNG distinguishes these on the status page and names which one it is. If the stored path is the problem, fix it in *Settings → Media Management*. |
+| `Download path does not exist` while the file is plainly there | The client reports a path ROMarrNG cannot see. | Make the container-side download path match what the client reports, or add a remote path mapping. |
 | Results found, then refused | No download client speaks that release's protocol. | Add a torrent and/or usenet client — the Download Clients page names the gap. |
 | Imported ROM never appears in the library | The rescan was refused. | RomM: grant the account task permission. Or the ROM landed outside the tree your library scans. |
-| Every PlayStation / PS2 / Wii import fails on the archive | `bsdtar` is missing. Those sets ship as `.7z`, and busybox/GNU `tar` is not a substitute — ROMarr will not pretend otherwise. | Docker and the Proxmox installer include it. From source: install `libarchive-tools`. |
+| Every PlayStation / PS2 / Wii import fails on the archive | `bsdtar` is missing. Those sets ship as `.7z`, and busybox/GNU `tar` is not a substitute — ROMarrNG will not pretend otherwise. | Docker and the Proxmox installer include it. From source: install `libarchive-tools`. |
 | Hub tab says plugins are unavailable | `rom-hub` is not installed. Expected on armv7, where its `pydantic` dependency has no musl wheel. | Elsewhere: `pip install "rom-hub @ git+https://github.com/BlizzHacker/rom-hub@master"` |
 | ROM imports but will not play in the browser | The platform has no emulator core in your library's web player. | Expected. The ROM is catalogued, not playable in-browser. |
 | Scheduled jobs never run on a freshly rebooted host | Fixed in `5cb6a75`. "Never run" was recorded as time `0.0`, and `time.monotonic()` counts from boot on Linux, so on a machine with less uptime than the job's interval every job looked "not due". | Update. |
@@ -805,7 +811,7 @@ failures, about 100 seconds.
 **Docker does not restart an unhealthy container.** `restart: unless-stopped`
 acts on the process *exiting*, not on the healthcheck failing. So `unhealthy`
 is a signal for whatever you monitor with, not a self-heal. If you want a
-wedged ROMarr restarted automatically, that is an autoheal sidecar or your
+wedged ROMarrNG restarted automatically, that is an autoheal sidecar or your
 orchestrator's job.
 
 ### Getting a log
@@ -833,5 +839,5 @@ ROMs survive; if it was inside the container's disk, they do not. Check with
 
 **From source.** Remove the checkout and `ROMARR_DATA`.
 
-ROMarr never edits your library server's database and never deletes ROMs it
+ROMarrNG never edits your library server's database and never deletes ROMs it
 did not import, so removing it leaves the library exactly as it was.

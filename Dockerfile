@@ -1,6 +1,6 @@
-# ROMarr -- the *arr for games.
+# ROMarrNG -- the *arr for games.
 #
-# Two stages, because of one dependency. ROMarr is stdlib plus `requests`, and
+# Two stages, because of one dependency. ROMarrNG is stdlib plus `requests`, and
 # requests pulls in charset-normalizer, which ships no musl wheel for every
 # architecture. On linux/arm/v7 pip therefore compiles it, and a compiler in
 # the final image would be ~180MB of toolchain nobody runs. So the build stage
@@ -23,7 +23,7 @@ RUN pip install --no-cache-dir --prefix=/install -r /tmp/requirements.txt
 #
 # Skipped on armv7: rom-hub depends on pydantic, whose compiled core ships no
 # musl wheel for 32-bit ARM and would drag a Rust toolchain into the build.
-# ROMarr itself runs fine there; the Hub tab reports plugins as unavailable,
+# ROMarrNG itself runs fine there; the Hub tab reports plugins as unavailable,
 # which is the truth.
 ARG TARGETARCH
 RUN if [ "$TARGETARCH" != "arm" ]; then \
@@ -104,9 +104,10 @@ EXPOSE 6868
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import os,urllib.request;urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('ROMARR_PORT','6868')+'/api/health',timeout=4)"
 
-LABEL org.opencontainers.image.title="ROMarr" \
-      org.opencontainers.image.description="The *arr for games: request a ROM, ROMarr finds it via Prowlarr, grabs it, and files it into your game library" \
-      org.opencontainers.image.source="https://github.com/BlizzHacker/romarr" \
+LABEL org.opencontainers.image.title="ROMarrNG" \
+      org.opencontainers.image.description="The *arr for games with durable SeerrNG request tracking and authenticated imported-file delivery" \
+      org.opencontainers.image.source="https://github.com/snapetech/ROMarrNG" \
+      org.opencontainers.image.upstream="https://github.com/BlizzHacker/romarr" \
       org.opencontainers.image.licenses="MIT"
 
 ENTRYPOINT ["/entrypoint.sh"]

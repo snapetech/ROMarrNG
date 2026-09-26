@@ -45,6 +45,10 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def now_iso_precise() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
+
+
 def _rows(raw: Any, cls: type) -> list:
     """Rebuild stored dicts into dataclasses, ignoring fields we do not know.
 
@@ -73,7 +77,7 @@ class Event:
     # Which library server received it. Empty for events that predate multiple
     # libraries, and for events that never reached one.
     library: str = ""
-    at: str = field(default_factory=now_iso)
+    at: str = field(default_factory=now_iso_precise)
 
 
 @dataclass
@@ -90,6 +94,9 @@ class WantedItem:
     # `attempts` it drives the re-search backoff, so a title that has failed
     # for months is retried weekly rather than hourly.
     searched_at: str = ""
+    # A request accepted through the integration API stays correlated while
+    # it waits for a later scheduled search to find a usable release.
+    external_request_id: str = ""
 
 
 @dataclass
@@ -127,6 +134,26 @@ class QueueItem:
     # Set once this row's release has been blocklisted, so the sweep that
     # retires dead downloads never does it twice.
     blocklisted: bool = False
+    # Present only when work originated from a versioned machine integration.
+    # It ties a completed import back to the caller's durable request record.
+    external_request_id: str = ""
+
+
+@dataclass
+class IntegrationRequest:
+    """Durable status and imported assets for one external request."""
+
+    external_request_id: str
+    game: str
+    platform: str
+    status: str = "searching"
+    detail: str = ""
+    # Internal records only: public responses deliberately omit library IDs
+    # and relative paths, returning only the opaque asset ID, name and size.
+    assets: list[dict[str, Any]] = field(default_factory=list)
+    created: str = field(default_factory=now_iso)
+    updated: str = field(default_factory=now_iso)
+    attempted_at: str = field(default_factory=now_iso_precise)
 
 
 # Defaults are spelled out here rather than scattered through the UI so a fresh
@@ -253,6 +280,7 @@ class Store:
         self.events: list[Event] = []
         self.wanted: list[WantedItem] = []
         self.queue: list[QueueItem] = []
+        self.integration_requests: list[IntegrationRequest] = []
         self.load()
 
     # -- persistence -------------------------------------------------------
@@ -299,6 +327,8 @@ class Store:
             # simply an empty queue -- the same thing those installs had after
             # every restart anyway.
             self.queue = _rows(raw.get("queue"), QueueItem)
+            self.integration_requests = _rows(
+                raw.get("integration_requests"), IntegrationRequest)
 
     def save(self) -> None:
         with self._lock:
@@ -307,6 +337,8 @@ class Store:
                 "events": [asdict(e) for e in self.events[-self.MAX_EVENTS:]],
                 "wanted": [asdict(w) for w in self.wanted],
                 "queue": [asdict(q) for q in self.queue[-self.MAX_QUEUE:]],
+                "integration_requests": [asdict(r)
+                                         for r in self.integration_requests],
             }
         self.path.parent.mkdir(parents=True, exist_ok=True)
         # Atomic: a crash mid-write would otherwise leave truncated JSON and
@@ -381,7 +413,10 @@ class Store:
 
     def missing(self) -> list[dict]:
         with self._lock:
-            return [asdict(w) for w in self.wanted]
+            rows = [asdict(w) for w in self.wanted]
+            for row in rows:
+                row.pop("external_request_id", None)
+            return rows
 
     def note_failure(self, game: str, platform: str, reason: str) -> None:
         with self._lock:
@@ -407,6 +442,23 @@ class Store:
                     break
         self.save()
 
+    def link_wanted_request(self, game: str, platform: str,
+                            external_request_id: str) -> None:
+        with self._lock:
+            for item in self.wanted:
+                if item.game.lower() == game.lower() and item.platform == platform:
+                    if external_request_id:
+                        item.external_request_id = external_request_id
+                    break
+        self.save()
+
+    def wanted_request_id(self, game: str, platform: str) -> str:
+        with self._lock:
+            item = next((entry for entry in self.wanted
+                         if entry.game.lower() == game.lower()
+                         and entry.platform == platform), None)
+            return item.external_request_id if item else ""
+
     # -- queue (Activity) ---------------------------------------------------
 
     def enqueue(self, item: QueueItem) -> QueueItem:
@@ -427,6 +479,69 @@ class Store:
     def queue_rows(self) -> list[dict]:
         with self._lock:
             return [asdict(q) for q in self.queue]
+
+    def integration_queue_item(self, external_request_id: str,
+                               *, after: str = "") -> QueueItem | None:
+        """Return the latest persisted queue row for one machine request."""
+        with self._lock:
+            return next((item for item in reversed(self.queue)
+                         if item.external_request_id == external_request_id
+                         and (not after or item.at >= after)), None)
+
+    # -- external requests -------------------------------------------------
+
+    def integration_request(self, external_request_id: str) -> IntegrationRequest | None:
+        with self._lock:
+            return next((item for item in self.integration_requests
+                         if item.external_request_id == external_request_id), None)
+
+    def create_integration_request(
+            self, game: str, platform: str,
+            external_request_id: str) -> tuple[IntegrationRequest, bool]:
+        """Create once by caller ID; return the existing row on retries."""
+        with self._lock:
+            existing = next((item for item in self.integration_requests
+                             if item.external_request_id == external_request_id), None)
+            if existing is not None:
+                return existing, False
+            item = IntegrationRequest(
+                external_request_id=external_request_id,
+                game=game,
+                platform=platform,
+            )
+            self.integration_requests.append(item)
+        self.save()
+        return item, True
+
+    def update_integration_request(
+            self, external_request_id: str, *, status: str,
+            detail: str | None = None,
+            assets: list[dict[str, Any]] | None = None) -> IntegrationRequest | None:
+        with self._lock:
+            item = next((entry for entry in self.integration_requests
+                         if entry.external_request_id == external_request_id), None)
+            if item is None:
+                return None
+            progress = {
+                "searching": 0,
+                "downloading": 1,
+                "importing": 2,
+                "available": 3,
+            }
+            if (item.status == "available" and status != "available") or (
+                    item.status in progress and status in progress and
+                    progress[status] < progress[item.status]):
+                return item
+            item.status = status
+            item.updated = now_iso()
+            if status == "searching":
+                item.attempted_at = now_iso_precise()
+            if detail is not None:
+                item.detail = detail
+            if assets is not None:
+                item.assets = copy.deepcopy(assets)
+        self.save()
+        return item
 
     # -- per-game shelf state ------------------------------------------------
     #

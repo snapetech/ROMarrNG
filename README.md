@@ -1,38 +1,50 @@
-# ROMarr
+# ROMarrNG
 
-**The *arr for games.** Request a title — ROMarr searches your indexers, picks the
+**The *arr for games.** Request a title — ROMarrNG searches your indexers, picks the
 best release, hands it to your download client, and files the ROM into your game
 library.
+
+ROMarrNG is a maintained fork of [ROMarr](https://github.com/BlizzHacker/romarr)
+for [SeerrNG](https://github.com/snapetech/seerrng). It keeps ROMarrNG's search,
+download, verification, and library-import workflow, and adds a versioned
+machine contract for idempotent SeerrNG requests, durable acquisition status,
+and authenticated access to the exact files imported for a request. ROMarrNG
+is a separate service; it does not replace SeerrNG's catalog or request UI.
 
 ```
 Move Weight
 └─ Yarr.It ................ one front door for a self-hosted media library
    └─ Cartridge ........... tools for self-hosting a retro game library
-      └─ ROMarr ........... you are here
-         └─ ROM Hub ....... ROMarr's plugin factory
+      └─ ROMarrNG .......... you are here
+         └─ ROM Hub ....... its plugin factory
 ```
 
-ROMarr runs perfectly well on its own — nothing above it is required.
+ROMarrNG runs perfectly well on its own — nothing above it is required.
 
-[ROM Hub](https://github.com/BlizzHacker/rom-hub) is ROMarr's plugin factory:
-it is where a source is written, run and sandboxed, and ROMarr picks the
+[ROM Hub](https://github.com/BlizzHacker/rom-hub) is ROMarrNG's plugin factory:
+it is where a source is written, run and sandboxed, and ROMarrNG picks the
 plugins up from its Hub tab. Adding a source means writing a plugin there, not
-patching ROMarr.
+patching ROMarrNG.
 
 If you run Radarr for films and Sonarr for TV, this is the missing one.
 
-[![CI](https://github.com/BlizzHacker/romarr/actions/workflows/docker.yml/badge.svg)](https://github.com/BlizzHacker/romarr/actions/workflows/docker.yml)
+[![CI](https://github.com/snapetech/ROMarrNG/actions/workflows/docker.yml/badge.svg)](https://github.com/snapetech/ROMarrNG/actions/workflows/docker.yml)
 [![licence MIT](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ed)](https://github.com/BlizzHacker/romarr/pkgs/container/romarr)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ed)](https://github.com/snapetech/ROMarrNG/pkgs/container/romarrng)
 [![platforms](https://img.shields.io/badge/arch-amd64%20%7C%20arm64%20%7C%20armv7-lightgrey)](#docker)
 
 ![Interactive search on a live install: 51 releases scored, the verified dump on top, every rejection explained](docs/img/interactive-search-live.png)
 
 *A real search on a live install — 51 releases, the DAT-verified dump ranked
 first at +50, romhacks and wrong-platform releases rejected with the reason
-written next to each. Every screenshot in this README is from the
-maintainer's production instance; [docs/PROOF.md](docs/PROOF.md) is the
-full claim-by-claim evidence file.*
+written next to each. These screenshots and [docs/PROOF.md](docs/PROOF.md)
+document inherited upstream ROMarr behavior; they do not claim validation of
+ROMarrNG's new SeerrNG integration contract.*
+
+The fork-specific contract is documented in
+[docs/SEERRNG-INTEGRATION.md](docs/SEERRNG-INTEGRATION.md). Use the ROMarrNG
+repository, image, or source when following this guide; upstream ROMarr does
+not provide the external request and asset endpoints described there.
 
 ---
 
@@ -116,7 +128,7 @@ guessed), and that a Wii Virtual Console WAD is not a Genesis cartridge.
 
 The one thing no other *arr can do. There is no canonical hash for a movie —
 but No-Intro (cartridges) and Redump (discs) publish the CRC32/MD5/SHA1 of
-every known-good dump. ROMarr checksums every import against your DATs:
+every known-good dump. ROMarrNG checksums every import against your DATs:
 
 - **verified** — byte-for-byte the published dump. Shown as `[!]` everywhere.
 - **bad dump** — right size, wrong hash. The case worth catching; refused
@@ -139,7 +151,7 @@ ladder** (4h → 7 days, so a game that isn't dumped yet doesn't get your
 tracker account banned); indexer **RSS feeds are watched hourly** in
 between, so a release that appears an hour after you asked is grabbed
 within the hour; lists sync every 6; dead downloads are retired every 15
-minutes (below); and once a day ROMarr asks GitHub if a newer version
+minutes (below); and once a day ROMarrNG asks GitHub if a newer version
 exists — and *tells* you, because an *arr that updates itself is an *arr
 that restarts mid-import. Every RSS match goes through the same
 scorer as a search: the feed can never grab what a search would refuse.
@@ -192,7 +204,7 @@ API" and could not be connected. **That was wrong**, and Playnite and
 LaunchBox were the standing counter-example — they have pulled *owned*
 libraries from all three for years. Each does have a web API; what none of
 them has is an application key you can request, so they authenticate with
-the browser session you already have. ROMarr now uses exactly the same
+the browser session you already have. ROMarrNG now uses exactly the same
 routes Playnite does: Epic's launcher OAuth, EA's entitlements API, and
 Blizzard's own account games list. One click opens the page, one paste
 connects it, and Epic's is a one-time code traded for a refresh token so
@@ -208,7 +220,7 @@ PC to read. It says so on the page.
 
 ![Collections: a DAT diffed against the shelf, acquisition in batches](docs/img/collections.png)
 
-Load a DAT, and ROMarr can answer "what does a complete set look like, and
+Load a DAT, and ROMarrNG can answer "what does a complete set look like, and
 how far off am I?" — full sets or **one-game-one-ROM** with your region
 ladder, diffed against what's actually on disk, acquired in resumable
 batches. A 3,000-title set is not an all-or-nothing operation: pause it,
@@ -230,7 +242,7 @@ shelves — popular, new, upcoming — browsable onto a Request button, and the
 
 Discord, Slack, Telegram, Pushover, Gotify, ntfy, plain webhooks, and
 Apprise (which unlocks ~100 more). Every other tool sends "Grabbed: Chrono
-Trigger". ROMarr's message carries **what the scorer weighed** —
+Trigger". ROMarrNG's message carries **what the scorer weighed** —
 `+50 verified good dump [!], +40 region usa, +40 30 seeders` — so you can
 tell a good pick from a lucky one without opening the UI.
 
@@ -276,12 +288,12 @@ docker run -d --name romarr \
   -p 6868:6868 \
   -e PUID=1000 -e PGID=1000 -e UMASK=002 -e TZ=Etc/UTC \
   -v /srv/romarr/config:/config \
-  ghcr.io/blizzhacker/romarr:latest
+  ghcr.io/snapetech/romarrng:latest
 ```
 
 Open `http://localhost:6868` and set a password.
 
-`--restart unless-stopped` is not decoration: without it ROMarr does not come
+`--restart unless-stopped` is not decoration: without it ROMarrNG does not come
 back after a host reboot, and the first sign is a week of missed scheduled
 searches. Use an **absolute** path for `/config` — Docker Engine below 23
 rejects a relative bind source as an invalid volume name.
@@ -290,7 +302,7 @@ To actually import anything, use compose.
 
 > **Upgrading from 0.6.x?** The default port changed from **7878 to 6868**.
 > 7878 is Radarr's port, and running both is the normal case rather than the
-> exception, so ROMarr was colliding with it on a default install. 6868 sits in
+> exception, so ROMarrNG was colliding with it on a default install. 6868 sits in
 > the gap the \*arr family left between Bazarr (6767) and Whisparr (6969).
 >
 > If you pinned the port yourself — `ROMARR_PORT`, or a `7878:7878` mapping —
@@ -309,7 +321,7 @@ setting commented ships in the repo:
 
 ```bash
 mkdir -p /srv/romarr && cd /srv/romarr
-curl -O https://raw.githubusercontent.com/BlizzHacker/romarr/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/snapetech/ROMarrNG/main/docker-compose.yml
 printf 'ROMARR_ROMS=/mnt/roms\nROMARR_DOWNLOADS=/mnt/downloads\n' > .env
 docker compose up -d
 ```
@@ -324,7 +336,7 @@ Settings page will say so; those two could only be wrong silently.
 ### Proxmox LXC
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/BlizzHacker/romarr/main/proxmox/ct/romarr.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/snapetech/ROMarrNG/main/proxmox/ct/romarr.sh)"
 ```
 
 It waits for `/api/health` to answer before claiming success, refuses to deploy
@@ -337,14 +349,14 @@ start.
 ### Home Assistant
 
 Settings → Add-ons → Add-on Store → ⋮ → Repositories, add
-`https://github.com/BlizzHacker/romarr`, install **ROMarr**. Options set on
-the add-on page become ROMarr's environment — see
+`https://github.com/snapetech/ROMarrNG`, install **ROMarrNG**. Options set on
+the add-on page become ROMarrNG's environment — see
 [homeassistant/romarr](homeassistant/romarr/README.md).
 
 ### From source
 
 ```bash
-git clone https://github.com/BlizzHacker/romarr.git && cd romarr
+git clone https://github.com/snapetech/ROMarrNG.git && cd ROMarrNG
 pip install -r requirements.txt
 cp .env.example .env          # edit it
 set -a; . ./.env; set +a
@@ -375,7 +387,7 @@ never chmod'd or chown'd.
 
 ## Signing in
 
-ROMarr requires a credential. There is no open mode you can fall into by
+ROMarrNG requires a credential. There is no open mode you can fall into by
 forgetting to configure something.
 
 **The first time you open the web UI**, it asks you to set a password. That is
@@ -388,7 +400,7 @@ the page.
 
 **To skip the setup screen entirely**, claim the install from its environment
 before it starts. This is what a container template should do, because it
-leaves no window in which an unclaimed ROMarr is reachable:
+leaves no window in which an unclaimed ROMarrNG is reachable:
 
 ```bash
 -e ROMARR_PASSWORD=choose-something-long
@@ -440,7 +452,7 @@ request actually came through it.
 | `LIBRARY_URL` | yes¹ | Library server base URL |
 | `LIBRARY_USERNAME` / `LIBRARY_PASSWORD` | yes¹ | Library credentials |
 | `LIBRARY_API_KEY` | — | Alternative to username/password |
-| `LIBRARY_PATH` | yes | Library root **as ROMarr sees it** (`/roms` in Docker) |
+| `LIBRARY_PATH` | yes | Library root **as ROMarrNG sees it** (`/roms` in Docker) |
 | `QBITTORRENT_URL` / `_USER` / `_PASS` | — | Torrent client |
 | `SABNZBD_URL` / `SABNZBD_API_KEY` | — | Usenet client |
 | `NZBGET_URL` / `NZBGET_USER` / `NZBGET_PASS` | — | Usenet client |
@@ -449,11 +461,11 @@ request actually came through it.
 | `STREAM_SERVER_URL` | no | Headless RetroArch stream server. Read-only; it is asked which platforms it can play, so PS2, GameCube, Wii, Dreamcast and 3DS are reported as playable rather than download-only |
 | `MOONLIGHT_HOST` | no | A Wolf, Sunshine or Steam Headless machine, e.g. `192.168.0.50`. Probed with the unauthenticated `/serverinfo`; reported on the status page |
 | `MOONLIGHT_KIND` | no | `wolf` (default), `sunshine` or `steam-headless`. Not sniffed — `/serverinfo` cannot tell them apart |
-| `MOONLIGHT_USER` / `MOONLIGHT_PASS` | no | Sunshine/Steam Headless admin credentials, so ROMarr can read the app list and relay a pairing PIN. Never written to the state file |
-| `WOLF_SOCKET_PATH` / `WOLF_API_URL` | no | Wolf's API is a UNIX socket. Give ROMarr a mounted `wolf.sock`, or the URL of the nginx proxy Wolf's own docs describe |
+| `MOONLIGHT_USER` / `MOONLIGHT_PASS` | no | Sunshine/Steam Headless admin credentials, so ROMarrNG can read the app list and relay a pairing PIN. Never written to the state file |
+| `WOLF_SOCKET_PATH` / `WOLF_API_URL` | no | Wolf's API is a UNIX socket. Give ROMarrNG a mounted `wolf.sock`, or the URL of the nginx proxy Wolf's own docs describe |
 | `STEAM_HEADLESS_URL` | no | The container's noVNC/neko desktop, surfaced as a link |
 | `ROMARR_PLAYERS` | no | Which browser players to offer, best first: `emulatorjs,ruffle,jsdos,emularity`. All four when unset; `none` turns every browser route off |
-| `ROMARR_JSDOS_URL` / `ROMARR_EMULARITY_URL` | no | Where your own js-dos and Emularity live. Without one, ROMarr reports that the player *would* run a file and names the setting that would let it link there |
+| `ROMARR_JSDOS_URL` / `ROMARR_EMULARITY_URL` | no | Where your own js-dos and Emularity live. Without one, ROMarrNG reports that the player *would* run a file and names the setting that would let it link there |
 | `ROMARR_DATA` | no | Path to the state file |
 | `DAT_PATH` | no | Directory of No-Intro / Redump DATs. Loose `.dat`/`.xml` files **and** the ZIP archives No-Intro distributes are read, including one level down beside the platform they describe. Point it at a DAT directory, not at your ROM library |
 | `COMPRESSATORIUM_URL` | no | A [Compressatorium](https://github.com/pacnpal/compressatorium) service, for the Decompress task: batch decompress a compressed library, verify every output against the DATs, and delete only the originals that verified. The library must be mounted into both containers at the same path |
@@ -477,7 +489,7 @@ Legacy `ROMM_*` variables are still read, so existing installs need no changes.
 
 `folder` covers Batocera, RetroPie, Recalbox, EmulationStation, ES-DE, EmuDeck,
 Pegasus, Lakka, muOS, ArkOS, LaunchBox, Playnite and Steam ROM Manager — they read
-ROMs from a directory laid out by platform, which is what ROMarr writes. No URL, no
+ROMs from a directory laid out by platform, which is what ROMarrNG writes. No URL, no
 account, no API key:
 
 ```
@@ -505,11 +517,11 @@ Spectrum, MSX / MSX2, Sharp X68000, MS-DOS.
 
 For Arcade, Neo Geo and DOS the archive **is** the ROM — MAME, FBNeo and
 dosbox_pure open the `.zip` themselves and expect its internal layout, so
-ROMarr imports it whole instead of unpacking a romset into loose chip dumps.
+ROMarrNG imports it whole instead of unpacking a romset into loose chip dumps.
 
 Disc images are multi-file. A `.cue` is a few hundred bytes of text naming
 tracks, and importing it on its own gives you a library entry with a title, a
-cover and no game — so ROMarr reads the sheet, takes every track it names, and
+cover and no game — so ROMarrNG reads the sheet, takes every track it names, and
 files the set as a directory, which is the layout RomM's scanner treats as one
 multi-part ROM. `.7z` and `.rar` are read as well as `.zip`, because that is
 what disc releases actually ship as.
@@ -523,7 +535,7 @@ are four routes and the last one is not a failure:
 |---|---|
 | **EmulatorJS** | In the browser, from your library server. Covers nine optical systems on a stock RomM: PlayStation, PSP, Saturn, Sega CD, 3DO, CD-i, PC-FX, TurboGrafx-CD and Amiga CD32. |
 | **Stream** | Something else renders and sends video. Two kinds answer here. A headless RetroArch server, which is how PS2, GameCube, Wii, Dreamcast, 3DS and Neo Geo CD play — set `STREAM_SERVER_URL`. Or a **Moonlight host** (Wolf, Sunshine, Steam Headless) — set `MOONLIGHT_HOST`. |
-| **Archive.org** | Their in-page emulator, which is Emularity. Real for cartridge and home-computer systems; Archive.org does **not** emulate disc systems, so ROMarr does not claim it for them. |
+| **Archive.org** | Their in-page emulator, which is Emularity. Real for cartridge and home-computer systems; Archive.org does **not** emulate disc systems, so ROMarrNG does not claim it for them. |
 | **Download** | Always — for a file that is actually here. |
 
 ### Which player, per file
@@ -541,9 +553,9 @@ and `GET /api/v1/play?file=…&platform=…` answers for one file.
 
 All four are on by default and any of them can be turned off with
 `ROMARR_PLAYERS`, best first. Turn **Ruffle** off if your RomM runs with
-`DISABLE_RUFFLE_RS`, so ROMarr stops promising a button that will not be
+`DISABLE_RUFFLE_RS`, so ROMarrNG stops promising a button that will not be
 there. Turn **Emularity** off if you would rather nobody was sent off your
-install to play something. Where more than one player can open a file, ROMarr
+install to play something. Where more than one player can open a file, ROMarrNG
 offers them in your order and names the reason for each; where one *could* and
 is not configured, it says which setting fixes that rather than saying nothing.
 
@@ -555,25 +567,25 @@ RomM calls it `missing_from_fs`, and on the maintainer's install that is
 
 Nothing plays those. Nothing streams them. Nothing *downloads* them either,
 which is why reporting them as "download only" was worse than saying nothing:
-it named a route that 404s. ROMarr says the file is not here, says what would
-play it once ROMarr has fetched it, and keeps the Archive.org route where it
+it named a route that 404s. ROMarrNG says the file is not here, says what would
+play it once ROMarrNG has fetched it, and keeps the Archive.org route where it
 applies — because that is somebody else's copy, and it is the reason a
 catalogued row was catalogued in the first place.
 
-**A Moonlight host is a desktop, not a platform router, and ROMarr says so.**
+**A Moonlight host is a desktop, not a platform router, and ROMarrNG says so.**
 Wolf, Sunshine and Steam Headless all answer `/serverinfo` with no credential,
-so ROMarr can always tell you the host is alive. What they *cannot* be asked
+so ROMarrNG can always tell you the host is alive. What they *cannot* be asked
 is what a given application will open — there is no endpoint for it in any of
 the three. So a host earns a platform a stream route only when its app list
 names an emulator for exactly one machine (PCSX2, Dolphin, flycast). A
 RetroArch or a Steam earns nothing, because a RetroArch with no cores and a
 RetroArch with forty look identical from outside the container. And **pairing
 is manual by design**: the PIN is generated by your Moonlight client, on your
-device, so ROMarr can be the box you type it into and nothing more. The whole
+device, so ROMarrNG can be the box you type it into and nothing more. The whole
 account is in [docs/design/streaming-hosts.md](docs/design/streaming-hosts.md),
 including a list of what has never been run against real hardware.
 
-**What still cannot play, and why.** ROMarr says this per platform on the
+**What still cannot play, and why.** ROMarrNG says this per platform on the
 Platforms page rather than making you find out at the point of clicking play.
 
 - **Atari Jaguar CD** — no emulator plays it. `virtualjaguar` is the only
@@ -591,7 +603,7 @@ firmware it says *that*, because a core with no BIOS does not fail loudly: it
 draws an error screen and streams it at a perfectly healthy 30 fps.
 
 Nothing is refused on these grounds — cataloguing a platform you play
-elsewhere is a legitimate thing to want. ROMarr tells you which route applies
+elsewhere is a legitimate thing to want. ROMarrNG tells you which route applies
 before the grab instead of leaving you to find out at the point of clicking
 play, and where a platform has no player it says what would fix it. If your
 stream server has the core but not the firmware, it says *that*, because a
@@ -605,7 +617,7 @@ it at a perfectly healthy 30 fps.
 ### Requesting a game
 
 **Library → Add New.** Enter a title, pick a platform, click *Search & Grab*.
-ROMarr searches, scores, grabs and imports.
+ROMarrNG searches, scores, grabs and imports.
 
 ### Interactive search
 
@@ -643,8 +655,8 @@ resolved server-side.
 
 ### GG Requestz
 
-GG Requestz pushes approved requests to ROMarr. It is not a `rom-hub webhook`
-command inside the ROMarr container. Open **System → GG Requestz requests** to
+GG Requestz pushes approved requests to ROMarrNG. It is not a `rom-hub webhook`
+command inside the ROMarrNG container. Open **System → GG Requestz requests** to
 build the exact setting, or configure this in the **GG Requestz container**:
 
 ```env
@@ -652,20 +664,20 @@ REQUEST_WEBHOOK_URL=http://romarr:6868/api/v1/webhook/ggrequestz?apikey=<ROMARR_
 ```
 
 `http://romarr:6868` works when both containers share a Docker network. On
-Unraid or separate networks, replace it with ROMarr's LAN or HTTPS URL as seen
+Unraid or separate networks, replace it with ROMarrNG's LAN or HTTPS URL as seen
 from inside GG Requestz. Restart GG Requestz after changing its environment.
 
-`GGREQUESTZ_URL` goes the other direction: it only lets ROMarr show and ping the
+`GGREQUESTZ_URL` goes the other direction: it only lets ROMarrNG show and ping the
 GG Requestz page. A green status there proves the page is reachable; it does
 not prove the outbound webhook is configured.
 
 GG Requestz 1.5 and newer dispatches when a request becomes **approved**, not
 when a pending request is first submitted. Enable `request.auto_approve` or
-approve the request manually. ROMarr answers an accepted request with HTTP 202;
+approve the request manually. ROMarrNG answers an accepted request with HTTP 202;
 an invalid event or unknown platform receives HTTP 422 so GG Requestz records a
 real delivery failure instead of treating the request as sent.
 
-The finished webhook URL contains ROMarr's API key. Treat it like a password,
+The finished webhook URL contains ROMarrNG's API key. Treat it like a password,
 keep it on a trusted Docker network or HTTPS, and do not paste it into public
 logs.
 
@@ -673,10 +685,10 @@ logs.
 
 ## Plugins
 
-**Hub → Plugins.** ROMarr's sources are [ROM Hub](https://github.com/BlizzHacker/rom-hub)
+**Hub → Plugins.** ROMarrNG's sources are [ROM Hub](https://github.com/BlizzHacker/rom-hub)
 plugins — install, enable and disable them from the UI.
 
-![ROMarr Hub plugins tab](docs/img/hub-plugins.png)
+![ROMarrNG Hub plugins tab](docs/img/hub-plugins.png)
 
 | Capability | Plugins | Examples |
 |---|:-:|---|
@@ -689,7 +701,7 @@ plugins — install, enable and disable them from the UI.
 | `stream` | 3 | resolve an item to a playable URL |
 | `census` | 1 | enumerate a whole source into a local catalogue |
 
-Install ROM Hub alongside ROMarr to enable the tab:
+Install ROM Hub alongside ROMarrNG to enable the tab:
 
 ```bash
 pip install "rom-hub @ git+https://github.com/BlizzHacker/rom-hub@master"
@@ -704,7 +716,7 @@ Plugins are third-party and sandboxed by the host — install only ones you trus
 
 ### Downloading from a ROM site
 
-Sites that serve files over plain HTTP have no torrent and no NZB, so ROMarr
+Sites that serve files over plain HTTP have no torrent and no NZB, so ROMarrNG
 fetches them itself. Two download clients on the **Download Clients** page
 cover it, and a plugin declares which one its site needs:
 
@@ -736,7 +748,7 @@ the finished answer for such a site. `tests/test_site_downloader.py` asserts
 the absence of the evasion machinery, so the promise fails the build rather
 than eroding quietly.
 
-**Installing the browser mode.** It is deliberately not a ROMarr dependency —
+**Installing the browser mode.** It is deliberately not a ROMarrNG dependency —
 Chromium is 867MB and 236 packages on Debian, which is not something to put in
 a 1GB container that will never use it. Direct downloads work without any of
 this, and the Download Clients page says so rather than failing obscurely.
@@ -746,7 +758,7 @@ this, and the Download Clients page says so rather than failing obscurely.
 pip install playwright && playwright install --with-deps chromium
 ```
 
-Then either leave **Browser Host** blank to launch Chromium beside ROMarr, or
+Then either leave **Browser Host** blank to launch Chromium beside ROMarrNG, or
 — better for a small container — run the browser somewhere else:
 
 ```bash
@@ -754,7 +766,7 @@ Then either leave **Browser Host** blank to launch Chromium beside ROMarr, or
 playwright run-server --host 0.0.0.0 --port 3000
 ```
 
-and point ROMarr at `ws://<host>:3000`. The driver runs there, so the finished
+and point ROMarrNG at `ws://<host>:3000`. The driver runs there, so the finished
 file streams back over the same socket and the two need no shared directory.
 (An `http://` endpoint — a bare `chromium --remote-debugging-port` — works too,
 but that Chromium saves onto its own disk, so it needs a directory both can
@@ -775,20 +787,20 @@ path; one is marked default.
 
 Routing is by platform — a library with platform rules receives only those
 platforms, everything else goes to the default. "N64 goes to Retrom" is one row on
-that page rather than a second ROMarr instance.
+that page rather than a second ROMarrNG instance.
 
-![ROMarr libraries](docs/img/libraries.png)
+![ROMarrNG libraries](docs/img/libraries.png)
 
-Each server needs its own path **as ROMarr sees it**. The Libraries page flags a
+Each server needs its own path **as ROMarrNG sees it**. The Libraries page flags a
 server that answers while its path is missing locally — usually a volume that was
-never mounted into ROMarr.
+never mounted into ROMarrNG.
 
 **Gaseous** has no scan trigger in its API and picks up files through its own
 background tasks (`TitleIngestor` every minute over the *Import* directory;
 `LibraryScan` every 1440 minutes over library paths). Point that library's path at
 Gaseous's Import directory, or lower the `LibraryScan` interval.
 
-**RomM** requires the account ROMarr uses to have permission to run tasks, or the
+**RomM** requires the account ROMarrNG uses to have permission to run tasks, or the
 rescan is refused with a 403.
 
 ---
@@ -800,7 +812,7 @@ The full list, including every way an install can fail to start, is in
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| "Download path does not exist" | The client reports a path ROMarr cannot see | Match the container-side download path, or set a mapping under Settings → Media Management |
+| "Download path does not exist" | The client reports a path ROMarrNG cannot see | Match the container-side download path, or set a mapping under Settings → Media Management |
 | Results found then refused | No download client for that protocol | Add a client for torrent and/or usenet — the Download Clients page names the gap |
 | Any environment change has no effect | The environment seeds on first run only; the Settings page is the authority after that | Change it on the Settings page |
 | Container exits 1 with "romarr.json exists but cannot be read" | The state file is owned by a user the container does not run as | `chown -R` your PUID:PGID on the directory mounted at `/config` — do not delete the file |
@@ -819,7 +831,7 @@ The full list, including every way an install can fail to start, is in
 ```
 
 Longest matching prefix wins. The log records both the path the client reported and
-what ROMarr resolved it to.
+what ROMarrNG resolved it to.
 
 ---
 
@@ -873,19 +885,19 @@ download clients and library backends; a .NET owner for the contrib
 plugins; Home Assistant users for the add-on; DAT sources for platforms
 beyond No-Intro/Redump coverage; and issues — a report with a log line is
 usually fixed the same week. Open issues:
-[github.com/BlizzHacker/romarr/issues](https://github.com/BlizzHacker/romarr/issues).
+[github.com/snapetech/ROMarrNG/issues](https://github.com/snapetech/ROMarrNG/issues).
 
 ---
 
 ## Cartridge ecosystem
 
-ROMarr is the acquisition component of **Cartridge**, a self-hosted retro-gaming
+ROMarrNG is the acquisition component of **Cartridge**, a self-hosted retro-gaming
 stack by MoveWeight.
 
 | | Project | Purpose |
 |---|---|---|
-| **Acquire** | [ROMarr](https://github.com/BlizzHacker/romarr) | Request, find, grab, file |
-| | [ROM Hub](https://github.com/BlizzHacker/rom-hub) | Plugin host — the sources ROMarr searches |
+| **Acquire** | [ROMarrNG](https://github.com/snapetech/ROMarrNG) | Request, find, grab, file |
+| | [ROM Hub](https://github.com/BlizzHacker/rom-hub) | Plugin host — the sources ROMarrNG searches |
 | **Play** | [Desktop](https://github.com/BlizzHacker/RommForDesktop) · [Xbox](https://github.com/BlizzHacker/RommForXbox) · [Roku](https://github.com/BlizzHacker/RommForRoku) | Clients |
 | | [Stream Server](https://github.com/BlizzHacker/RommStreamServer) | Remote play |
 | **Above** | [Yarr.It](https://github.com/BlizzHacker/yarr-it) — [yarrit.com](https://yarrit.com) | The front door for a self-hosted media library. Ad-free torrent streaming that plays in the browser. |
@@ -895,14 +907,14 @@ Brand and naming: [BRAND.md](https://github.com/BlizzHacker/rom-hub/blob/master/
 ## Acknowledgements
 
 **[Questarr](https://github.com/Doezer/Questarr)** by Doezer (GPL-3.0).
-Several ROMarr features landed after Questarr proved the demand for them in
+Several ROMarrNG features landed after Questarr proved the demand for them in
 a game *arr: the scheduled search / RSS-sync clock, per-game status,
 ratings and notes, the stats page, the wider download-client roster
 (Transmission, Deluge, rTorrent, Synology Download Station), native SSL,
 and Home Assistant packaging. No code was taken — Questarr is TypeScript
-and ROMarr is Python — but the case for those features was made there
+and ROMarrNG is Python — but the case for those features was made there
 first, and saying so costs nothing. As of August 2026 every capability on
-their feature list and published roadmap has a ROMarr equivalent, and the
+their feature list and published roadmap has a ROMarrNG equivalent, and the
 acquisitions here come with the one thing no title-parsing pipeline can
 add: a checksum against the published dump.
 
@@ -910,7 +922,7 @@ add: a checksum against the published dump.
 Several features here exist because gamarr had them first and its README made
 the case for them plainly: the blocklist, release profiles, quality profiles,
 notification connections, tags, manual import, and Prometheus metrics. No code
-was taken — gamarr is Go and ROMarr is Python, and every implementation here
+was taken — gamarr is Go and ROMarrNG is Python, and every implementation here
 was written from scratch — but the feature set was informed by theirs, and
 saying so is the least that is owed.
 
@@ -918,9 +930,9 @@ saying so is the least that is owed.
 download-client registries rendered from field definitions, quality and
 release profiles, remote path mappings, and Manual Import.
 
-### The ecosystem ROMarr stands on
+### The ecosystem ROMarrNG stands on
 
-ROMarr acquires ROMs and files them — nothing more. It stores no library,
+ROMarrNG acquires ROMs and files them — nothing more. It stores no library,
 serves no player, publishes no DAT, indexes no tracker, runs no download.
 **Every one of those is somebody else's work, and without them there is
 nothing here to automate.** The same list, with an install command for each
@@ -932,7 +944,7 @@ respect that is also a convenience is worth more than a paragraph.
 [Gaseous](https://github.com/gaseous-project/gaseous-server),
 [Retrom](https://github.com/JMBeresford/retrom),
 [Gameyfin](https://github.com/gameyfin/gameyfin). RomM in particular is the
-project ROMarr was built beside, and its EmulatorJS core map is the basis of
+project ROMarrNG was built beside, and its EmulatorJS core map is the basis of
 the playability routing.
 
 **Players** — how a library is played:
@@ -949,13 +961,13 @@ the playability routing.
 
 **Acquisition** — the rest of the request pipeline:
 [GG Requestz](https://github.com/XTREEMMAK/ggrequestz) by XTREEMMAK (the
-Overseerr of games — ROMarr takes its requests),
+Overseerr of games — ROMarrNG takes its requests),
 [Prowlarr](https://prowlarr.com), and
 [qBittorrent](https://www.qbittorrent.org).
 
 **Preservation** — what makes verification real at all:
 **[No-Intro](https://no-intro.org)** and **[Redump](http://redump.org)**,
-whose DATs are the only reason ROMarr can say a file is correct rather than
+whose DATs are the only reason ROMarrNG can say a file is correct rather than
 just plausible.
 
 

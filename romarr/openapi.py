@@ -49,7 +49,7 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
                                       "it."),
     "/api/v1/queue": ("GET", "Active downloads."),
     "/api/queue": ("GET", "Active downloads (legacy path)."),
-    "/api/v1/history": ("GET", "What ROMarr has done."),
+    "/api/v1/history": ("GET", "What ROMarrNG has done."),
     "/api/v1/config": ("GET", "Settings, with every credential masked."),
     "/api/v1/system/status": ("GET", "Health of every dependency, plus play-route counts."),
     "/api/v1/system/counts": ("GET", "Library and queue sizes. `games` is "
@@ -102,7 +102,7 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "/api/v1/collection/step": ("POST", "Request the next slice of a batch."),
     "/api/v1/collection/control": ("POST", "pause, resume, retry or cancel a "
                                            "batch."),
-    "/api/v1/manualimport": ("GET", "Scan a directory for files ROMarr could adopt."),
+    "/api/v1/manualimport": ("GET", "Scan a directory for files ROMarrNG could adopt."),
     "/api/v1/backup": ("GET", "A restorable snapshot. Credentials are stripped "
                               "unless ?secrets=1."),
     "/api/v1/restore": ("POST", "Restore a backup."),
@@ -116,7 +116,7 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "/api/v1/hub/source/check": ("POST", "Whether a repository URL may be "
                                          "installed from."),
     "/api/v1/hub/submit": ("POST", "Validate a catalogue submission and return "
-                                   "a link. ROMarr does not post it."),
+                                   "a link. ROMarrNG does not post it."),
     "/api/v1/capture": ("POST", "Catalogue rows captured by the browser "
                                 "extension from a page the operator visited, "
                                 "for sites no HTTP client can read. Validated "
@@ -133,6 +133,12 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
                                       "connection test calls."),
     "/api/v1/webhook": ("POST", "Inbound game request from a front-end."),
     "/api/request": ("POST", "Request a game."),
+    "/api/v1/integration/ping": ("GET", "Authenticated ROMarrNG integration handshake and contract version."),
+    "/api/v1/integration/requests": ("POST", "Idempotently submit an external request using `externalRequestId`, title and supported platform."),
+    "/api/v1/integration/requests/{requestId}": ("GET", "Read durable status for one authenticated external request."),
+    "/api/v1/integration/requests/{requestId}/retry": ("POST", "Retry one failed external request using its original idempotency ID."),
+    "/api/v1/integration/requests/{requestId}/assets": ("GET", "List verified imported files for one available external request. File paths are never returned."),
+    "/api/v1/integration/requests/{requestId}/assets/{assetId}": ("GET", "Stream one request-scoped imported file with safe attachment headers and byte-range support."),
     "/api/v1/system/tasks": ("GET", "The scheduled jobs: interval, last run, "
                                     "last result."),
     "/api/v1/log/tail": ("GET", "The live process log: records after ?since=, "
@@ -173,7 +179,7 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
                                         "YYYY-MM and ?day=. Reports its own "
                                         "coverage; ?decade=1990s still lists "
                                         "that decade."),
-    "/api/v1/peer": ("GET", "Peered ROMarr instances: scope, access and "
+    "/api/v1/peer": ("GET", "Peered ROMarrNG instances: scope, access and "
                             "confirmation state. Tokens never appear here."),
     "/api/v1/peer/invite": ("POST", "Mint a one-time invitation: a link that "
                                     "carries no secret, a short claim code "
@@ -212,7 +218,7 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "/api/v1/friends/netplay": ("POST", "Offer a friend a game to play, "
                                         "carrying the SHA1 of your dump so "
                                         "both sides agree on the bytes."),
-    "/api/v1/ecosystem": ("GET", "The projects ROMarr stands on: library "
+    "/api/v1/ecosystem": ("GET", "The projects ROMarrNG stands on: library "
                                  "servers, players, indexers, DAT databases "
                                  "-- repo, site and install command for each."),
     "/api/v1/audit": ("GET", "Verify the existing library against your DATs, "
@@ -342,10 +348,10 @@ def spec(version: str = "0.0.0", *, base_url: str = "") -> dict:
     return {
         "openapi": VERSION,
         "info": {
-            "title": "ROMarr",
+            "title": "ROMarrNG",
             "version": version,
             "description": (
-                "The *arr for games. Request a ROM, ROMarr finds it, grabs "
+                "The *arr for games. Request a ROM, ROMarrNG finds it, grabs "
                 "it, verifies it against a No-Intro or Redump DAT, and files "
                 "it into your library.\n\n"
                 "Every endpoint except `/`, `/api/health` and `/api/v1/login` "
