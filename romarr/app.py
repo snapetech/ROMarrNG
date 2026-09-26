@@ -32,16 +32,19 @@ Routes:
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
+import mimetypes
 import os
 import pathlib
 import re
 import threading
+import unicodedata
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, unquote_plus, urlparse
+from urllib.parse import parse_qs, quote, unquote, unquote_plus, urlparse
 
 import time
 
@@ -97,7 +100,7 @@ LIST_SECRETS = ("api_key", "openxbl_key", "npsso", "itchio_key",
                 "battlenet_cookie", "humble_cookie")
 from .scheduler import Scheduler, next_search_due
 from .selection import best_release, judge, score
-from .store import Event, QueueItem, Store
+from .store import Event, QueueItem, SeerrRequest, Store
 from .ui import page as ui_page
 from .ui import link_page as ui_link_page
 from .ui import login_page as ui_login_page
@@ -149,6 +152,170 @@ def category_for(env: dict[str, str], client: str) -> str:
     field rather than assuming where the category put it.
     """
     return env.get(f"{client}_CATEGORY") or DEFAULT_CATEGORY
+
+
+def _seerr_title_key(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value).casefold())
+    without_marks = "".join(char for char in normalized
+                            if not unicodedata.combining(char))
+    return re.sub(r"[^a-z0-9]+", "", without_marks)
+
+
+def _seerr_library_matches(service, request: SeerrRequest) -> list[dict]:
+    try:
+        rows = service.library_view(q=request.game, limit=500).get("items", [])
+    except Exception:
+        return []
+    wanted_title = _seerr_title_key(request.game)
+    matches = []
+    for row in rows:
+        if _seerr_title_key(row.get("name", "")) != wanted_title:
+            continue
+        platform = resolve(row.get("platform", ""))
+        if platform and platform.slug == request.platform:
+            matches.append(row)
+    return matches
+
+
+def _seerr_local_assets(service, request: SeerrRequest) -> list[dict]:
+    """Only expose real files under the configured local library root.
+
+    Remote catalogue IDs are not paths. They are intentionally ignored here;
+    streaming a provider's arbitrary ID as a filesystem path would turn this
+    request API into a local-file read endpoint.
+    """
+    target = service.library_for(request.platform)
+    if target is None:
+        target = service.default_library()
+    if target is None:
+        return []
+    try:
+        root = service.library_root(target[0]).resolve(strict=True)
+    except OSError:
+        return []
+
+    assets: list[dict] = []
+    scanned = 0
+    for row in _seerr_library_matches(service, request):
+        source = Path(str(row.get("id") or ""))
+        if not source.is_absolute():
+            continue
+        try:
+            source = source.resolve(strict=True)
+            source.relative_to(root)
+        except (OSError, ValueError):
+            continue
+        paths: list[Path] = []
+        if source.is_file():
+            paths = [source]
+        elif source.is_dir():
+            for current, dirs, files in os.walk(source, followlinks=False):
+                dirs[:] = [name for name in dirs
+                           if not (Path(current) / name).is_symlink()]
+                for name in files:
+                    scanned += 1
+                    if scanned > 10_000:
+                        break
+                    paths.append(Path(current) / name)
+                    if len(paths) >= 100:
+                        break
+                if scanned > 10_000 or len(paths) >= 100:
+                    break
+
+        for candidate in paths:
+            try:
+                real = candidate.resolve(strict=True)
+                real.relative_to(root)
+                if not real.is_file():
+                    continue
+                size = real.stat().st_size
+            except (OSError, ValueError):
+                continue
+            asset_id = hashlib.sha256(str(real).encode("utf-8")).hexdigest()
+            assets.append({"id": asset_id, "name": real.name,
+                           "size": size, "path": real})
+            if len(assets) >= 100:
+                return assets
+    return assets
+
+
+def _seerr_request_view(service, request: SeerrRequest) -> dict:
+    queue_rows = [
+        item for item in service.queue
+        if item.external_request_id == request.external_request_id
+    ]
+    queue_item = queue_rows[-1] if queue_rows else None
+    assets = _seerr_local_assets(service, request)
+    status = "searching" if request.status == "dispatching" else request.status
+    error = request.error or None
+    if status != "cancelled":
+        if queue_item and queue_item.state == "imported":
+            status, error = "available", None
+        elif queue_item and queue_item.state == "grabbed":
+            status, error = "downloading", None
+        elif queue_item and queue_item.state in ("failed", "import-failed"):
+            status = "failed"
+            error = queue_item.detail or request.error or "ROMarr could not complete the request."
+        elif assets or _seerr_library_matches(service, request):
+            status, error = "available", None
+        if (
+            not (request.status == "dispatching" and status == "searching")
+            and (status != request.status or (error or "") != request.error)
+        ):
+            service.store.update_seerr_request(
+                request.external_request_id,
+                status=status,
+                error=error or "",
+            )
+            request.status = status
+            request.error = error or ""
+    return {
+        "externalRequestId": request.external_request_id,
+        "status": status,
+        "deliverable": bool(assets),
+        "error": error,
+        "title": request.game,
+        "game": {"id": request.external_request_id,
+                 "title": request.game, "status": status},
+        "platform": request.platform,
+    }
+
+
+def _start_seerr_dispatch(service, request: SeerrRequest) -> None:
+    """Run ROMarr's normal search without holding the SeerrNG HTTP request."""
+    def dispatch() -> None:
+        try:
+            result = service.request(
+                request.game,
+                request.platform,
+                external_request_id=request.external_request_id,
+            )
+        except Exception as err:  # noqa: BLE001 - reflected as a safe status
+            log.exception("SeerrNG request dispatch failed")
+            service.store.update_seerr_request(
+                request.external_request_id,
+                status="failed",
+                error=f"ROMarr request failed ({err.__class__.__name__}).",
+                only_if_not_cancelled=True,
+            )
+            return
+
+        if result.get("cancelled"):
+            return
+        service.store.update_seerr_request(
+            request.external_request_id,
+            status="downloading" if result.get("ok") else "failed",
+            error="" if result.get("ok") else str(
+                result.get("error") or "ROMarr could not find a usable release."
+            ),
+            only_if_not_cancelled=True,
+        )
+
+    threading.Thread(
+        target=dispatch,
+        name=f"seerr-rom-request-{request.external_request_id[-12:]}",
+        daemon=True,
+    ).start()
 
 
 # QueueItem is defined in .store, beside the other things that survive a
@@ -345,6 +512,10 @@ class ROMarr:
         # lost everything you had asked for, which is the difference between a
         # tool and a demo.
         self.store = Store(e.get("ROMARR_DATA", "/opt/romarr/romarr.json"))
+        # A durable "dispatching" marker means the process stopped somewhere
+        # between reserving a request and recording the downloader handoff.
+        # Reconcile it once at startup, when the old worker can no longer race.
+        self.store.recover_seerr_dispatches()
         # A library path saved through the UI has to win over the environment,
         # or the setting is one you can change but not apply. A *default* must
         # not, which is why the stored default is empty: otherwise it outranks
@@ -1443,17 +1614,26 @@ class ROMarr:
                     merged.append(release)
         return merged
 
-    def request(self, game: str, platform_name: str) -> dict:
+    def request(self, game: str, platform_name: str,
+                external_request_id: str = "") -> dict:
         platform = resolve(platform_name)
         if platform is None:
             return {"ok": False, "error": f"unknown platform: {platform_name!r}"}
 
         releases = self._search_releases(game, platform)
+        if external_request_id:
+            request = self.store.get_seerr_request(external_request_id)
+            if request is None or request.status == "cancelled":
+                return {"ok": False, "cancelled": True}
         pick = best_release(releases, game, platform,
                            profile=self.profile, blocklist=self.blocklist)
         if pick is None:
+            if external_request_id and not self.store.mark_seerr_dispatching(
+                    external_request_id):
+                return {"ok": False, "cancelled": True}
             item = QueueItem(game, platform.slug, "", 0, "failed",
-                             f"no usable release among {len(releases)} result(s)")
+                             f"no usable release among {len(releases)} result(s)",
+                             external_request_id=external_request_id)
             self.store.enqueue(item)
             self.store.want(game, platform.slug)
             self.store.note_failure(game, platform.slug, item.detail)
@@ -1462,6 +1642,9 @@ class ROMarr:
             return {"ok": False, "error": item.detail}
 
         if not pick.download_url:
+            if external_request_id and not self.store.mark_seerr_dispatching(
+                    external_request_id):
+                return {"ok": False, "cancelled": True}
             # The release's own fault, and worth retiring: nothing about the
             # next sweep would choose differently, so without the blocklist
             # this result is picked again every twelve hours forever.
@@ -1470,7 +1653,8 @@ class ROMarr:
                              release_id=release_id(pick),
                              indexer=getattr(pick, "indexer", ""),
                              size=getattr(pick, "size", 0),
-                             release_fault=True)
+                             release_fault=True,
+                             external_request_id=external_request_id)
             self.store.enqueue(item)
             self.store.want(game, platform.slug)
             self.store.note_failure(game, platform.slug, item.detail)
@@ -1478,9 +1662,15 @@ class ROMarr:
                                     release=pick.title, detail=item.detail))
             return {"ok": False, "error": item.detail}
 
-        return self.grab(pick, game, platform.slug)
+        return self.grab(
+            pick,
+            game,
+            platform.slug,
+            external_request_id=external_request_id,
+        )
 
-    def grab(self, pick, game: str, platform_slug: str, *, manual: bool = False) -> dict:
+    def grab(self, pick, game: str, platform_slug: str, *, manual: bool = False,
+             external_request_id: str = "") -> dict:
         """Hand one release to a download client and record what happened.
 
         Shared by the automatic path and the Search page, deliberately: a
@@ -1490,6 +1680,9 @@ class ROMarr:
         """
         client = pick_client(pick.protocol, self.clients)
         if client is None:
+            if external_request_id and not self.store.mark_seerr_dispatching(
+                    external_request_id):
+                return {"ok": False, "cancelled": True}
             # Not the release's fault -- blocklisting it here would punish a
             # perfectly good torrent because the operator has not set up a
             # client yet, and the block would outlive the mistake.
@@ -1497,7 +1690,8 @@ class ROMarr:
                              f"no download client configured for {pick.protocol}",
                              release_id=release_id(pick),
                              indexer=getattr(pick, "indexer", ""),
-                             size=getattr(pick, "size", 0))
+                             size=getattr(pick, "size", 0),
+                             external_request_id=external_request_id)
             self.store.enqueue(item)
             self.store.want(game, platform_slug)
             self.store.note_failure(game, platform_slug, item.detail)
@@ -1509,6 +1703,9 @@ class ROMarr:
         # it: the import sweep matches a finished download to its queue row by
         # that title, and a file named by the site it came from would never
         # match. See downloaders.hand_off.
+        if external_request_id and not self.store.mark_seerr_dispatching(
+                external_request_id):
+            return {"ok": False, "cancelled": True}
         ok = hand_off(client, pick.download_url, name=pick.title)
         item = QueueItem(game, platform_slug, pick.title, pick.seeders,
                          "grabbed" if ok else "failed",
@@ -1516,8 +1713,16 @@ class ROMarr:
                          release_id=release_id(pick),
                          indexer=getattr(pick, "indexer", ""),
                          size=getattr(pick, "size", 0),
-                         release_fault=not ok)
+                         release_fault=not ok,
+                         external_request_id=external_request_id)
         self.store.enqueue(item)
+        if external_request_id:
+            self.store.update_seerr_request(
+                external_request_id,
+                status="downloading" if ok else "failed",
+                error="" if ok else item.detail,
+                only_if_not_cancelled=True,
+            )
         if ok:
             self.store.record(Event(kind="grabbed", game=game, platform=platform_slug,
                                     release=pick.title, seeders=pick.seeders,
@@ -4603,6 +4808,108 @@ def make_handler(service: ROMarr):
                                   "text/html; charset=utf-8")
 
             # --- *arr-shaped API ---------------------------------------
+            if route.path == "/api/v1/integration/ping":
+                return self._json(200, {
+                    "service": "romarr",
+                    "version": VERSION,
+                    "apiVersion": 1,
+                    "requestContractVersion": 1,
+                })
+            seerr_prefix = "/api/v1/integration/requests/"
+            if route.path.startswith(seerr_prefix):
+                parts = route.path[len(seerr_prefix):].split("/")
+                external_id = unquote(parts[0]) if parts else ""
+                if not re.fullmatch(r"[A-Za-z0-9._:-]{1,255}", external_id):
+                    return self._json(400, {"error": "invalid request ID"})
+                request = service.store.get_seerr_request(external_id)
+                if request is None:
+                    return self._json(404, {"error": "request not found"})
+                view = _seerr_request_view(service, request)
+                if len(parts) == 1:
+                    return self._json(200, view)
+                if len(parts) == 2 and parts[1] == "assets":
+                    assets = _seerr_local_assets(service, request)
+                    return self._json(200, {
+                        "assets": [{"id": item["id"], "name": item["name"],
+                                    "size": item["size"], "url": ""}
+                                   for item in assets],
+                        "bundleSupported": False,
+                    })
+                if len(parts) == 3 and parts[1] == "assets":
+                    asset_id = unquote(parts[2])
+                    asset = next(
+                        (item for item in _seerr_local_assets(service, request)
+                         if item["id"] == asset_id),
+                        None,
+                    )
+                    if asset is None:
+                        return self._json(404, {"error": "asset not found"})
+                    try:
+                        fh = open(asset["path"], "rb")
+                        size = os.fstat(fh.fileno()).st_size
+                    except OSError:
+                        return self._json(404, {"error": "asset not found"})
+                    start, end, status = 0, max(0, size - 1), 200
+                    byte_range = self.headers.get("Range", "")
+                    if byte_range:
+                        match = re.fullmatch(r"bytes=(\d*)-(\d*)", byte_range.strip())
+                        if not match or size == 0:
+                            fh.close()
+                            self.send_response(416)
+                            self.send_header("Content-Range", f"bytes */{size}")
+                            self.send_header("Content-Length", "0")
+                            self.end_headers()
+                            return None
+                        if not match.group(1):
+                            suffix = int(match.group(2) or 0)
+                            if suffix <= 0:
+                                fh.close()
+                                self.send_response(416)
+                                self.send_header("Content-Range", f"bytes */{size}")
+                                self.send_header("Content-Length", "0")
+                                self.end_headers()
+                                return None
+                            start = max(0, size - suffix)
+                        else:
+                            start = int(match.group(1))
+                        if match.group(2) and match.group(1):
+                            end = min(size - 1, int(match.group(2)))
+                        if start < 0 or start >= size or end < start:
+                            fh.close()
+                            self.send_response(416)
+                            self.send_header("Content-Range", f"bytes */{size}")
+                            self.send_header("Content-Length", "0")
+                            self.end_headers()
+                            return None
+                        status = 206
+                    length = max(0, end - start + 1)
+                    self.send_response(status)
+                    self.send_header("Content-Type", mimetypes.guess_type(asset["name"])[0]
+                                     or "application/octet-stream")
+                    self.send_header(
+                        "Content-Disposition",
+                        "attachment; filename*=UTF-8''" + quote(asset["name"]),
+                    )
+                    self.send_header("Accept-Ranges", "bytes")
+                    self.send_header("Content-Length", str(length))
+                    if status == 206:
+                        self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+                    self.end_headers()
+                    try:
+                        fh.seek(start)
+                        remaining = length
+                        while remaining:
+                            chunk = fh.read(min(1 << 20, remaining))
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                            remaining -= len(chunk)
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
+                    finally:
+                        fh.close()
+                    return None
+                return self._json(404, {"error": "not found"})
             if route.path == "/api/v1/game":
                 # Served from the background cache. Calling RomM here meant the
                 # page waited behind whatever else was querying that table.
@@ -5071,6 +5378,101 @@ def make_handler(service: ROMarr):
                 body = json.loads(self.rfile.read(length) or b"{}")
             except json.JSONDecodeError:
                 return self._json(400, {"error": "invalid json"})
+
+            if route.path == "/api/v1/integration/requests":
+                if not isinstance(body, dict):
+                    return self._json(400, {"error": "invalid request payload"})
+                external_id = str(body.get("externalRequestId") or "").strip()
+                game = str(body.get("game") or "").strip()
+                requested_platform = str(body.get("platform") or "").strip()
+                platform = resolve(requested_platform)
+                if (not re.fullmatch(r"[A-Za-z0-9._:-]{1,255}", external_id)
+                        or not game or len(game) > 500 or platform is None):
+                    return self._json(400, {
+                        "error": "externalRequestId, game and a valid platform are required"})
+                existing = service.store.get_seerr_request(external_id)
+                if existing:
+                    return self._json(200, _seerr_request_view(service, existing))
+                row = SeerrRequest(
+                    external_request_id=external_id,
+                    game=game,
+                    platform=platform.slug,
+                    status="available" if _seerr_library_matches(
+                        service,
+                        SeerrRequest(external_id, game, platform.slug),
+                    ) else "searching",
+                )
+                service.store.put_seerr_request(row)
+                if row.status != "available":
+                    _start_seerr_dispatch(service, row)
+                return self._json(202, _seerr_request_view(
+                    service, service.store.get_seerr_request(external_id)))
+
+            request_prefix = "/api/v1/integration/requests/"
+            if route.path.startswith(request_prefix):
+                parts = [unquote(value) for value in route.path[
+                    len(request_prefix):].split("/")]
+                external_id = parts[0] if parts else ""
+                if not re.fullmatch(r"[A-Za-z0-9._:-]{1,255}", external_id):
+                    return self._json(400, {"error": "invalid request ID"})
+                row = service.store.get_seerr_request(external_id)
+                if row is None:
+                    return self._json(404, {"error": "request not found"})
+                if len(parts) == 2 and parts[1] == "retry":
+                    current = _seerr_request_view(service, row)
+                    if current["status"] == "cancelled":
+                        return self._json(409, {"error": "cancelled requests cannot be retried"})
+                    if current["status"] in ("searching", "downloading", "available"):
+                        return self._json(200, current)
+                    if (
+                        row.error.startswith("The server restarted during download handoff.")
+                        and not (
+                            isinstance(body, dict)
+                            and body.get("confirmNoExistingDownload") is True
+                        )
+                    ):
+                        return self._json(409, {
+                            "confirmationRequired": "confirmNoExistingDownload",
+                            "error": row.error,
+                        })
+                    service.store.update_seerr_request(external_id, status="searching")
+                    row = service.store.get_seerr_request(external_id)
+                    _start_seerr_dispatch(service, row)
+                    return self._json(202, _seerr_request_view(service, row))
+                if len(parts) == 2 and parts[1] == "cancel":
+                    if not isinstance(body, dict):
+                        return self._json(400, {"error": "invalid cancellation payload"})
+                    if (
+                        "confirmNoExistingDownload" in body
+                        and not isinstance(body.get("confirmNoExistingDownload"), bool)
+                    ):
+                        return self._json(400, {"error": "invalid cancellation confirmation"})
+                    current = _seerr_request_view(service, row)
+                    if current["status"] == "cancelled":
+                        return self._json(200, current)
+                    if current["status"] == "available":
+                        return self._json(409, {"error": "available requests cannot be cancelled"})
+                    outcome = service.store.cancel_seerr_request(
+                        external_id,
+                        confirm_no_existing_download=(
+                            body.get("confirmNoExistingDownload") is True
+                        ),
+                    )
+                    if outcome == "available":
+                        return self._json(409, {"error": "available requests cannot be cancelled"})
+                    if outcome == "active":
+                        return self._json(409, {
+                            "error": "ROMarr has handed this request to the download client; cancel the transfer there"})
+                    if outcome == "confirmation":
+                        return self._json(409, {
+                            "confirmationRequired": "confirmNoExistingDownload",
+                            "error": row.error,
+                        })
+                    if outcome == "missing":
+                        return self._json(404, {"error": "request not found"})
+                    return self._json(200, _seerr_request_view(
+                        service, service.store.get_seerr_request(external_id)))
+                return self._json(404, {"error": "not found"})
 
             if route.path == "/api/v1/capture":
                 # Catalogue rows the operator's own browser saw, from a site no

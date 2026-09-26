@@ -26,7 +26,7 @@ import os
 import tempfile
 import threading
 from dataclasses import asdict, dataclass, field, fields as dataclass_fields, is_dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -127,6 +127,20 @@ class QueueItem:
     # Set once this row's release has been blocklisted, so the sweep that
     # retires dead downloads never does it twice.
     blocklisted: bool = False
+    # SeerrNG's request identity, when ROMarr was dispatched by SeerrNG.
+    external_request_id: str = ""
+
+
+@dataclass
+class SeerrRequest:
+    """Durable request identity shared with a SeerrNG instance."""
+
+    external_request_id: str
+    game: str
+    platform: str
+    status: str = "accepted"
+    error: str = ""
+    updated_at: str = field(default_factory=now_iso)
 
 
 # Defaults are spelled out here rather than scattered through the UI so a fresh
@@ -240,6 +254,7 @@ class Store:
     # are cleared. The cap is a backstop against a runaway sweep filling the
     # state file, not an expected working size.
     MAX_QUEUE = 500
+    MAX_SEERR_REQUESTS = 1000
 
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -253,6 +268,7 @@ class Store:
         self.events: list[Event] = []
         self.wanted: list[WantedItem] = []
         self.queue: list[QueueItem] = []
+        self.seerr_requests: list[SeerrRequest] = []
         self.load()
 
     # -- persistence -------------------------------------------------------
@@ -299,6 +315,7 @@ class Store:
             # simply an empty queue -- the same thing those installs had after
             # every restart anyway.
             self.queue = _rows(raw.get("queue"), QueueItem)
+            self.seerr_requests = _rows(raw.get("seerr_requests"), SeerrRequest)
 
     def save(self) -> None:
         with self._lock:
@@ -307,6 +324,7 @@ class Store:
                 "events": [asdict(e) for e in self.events[-self.MAX_EVENTS:]],
                 "wanted": [asdict(w) for w in self.wanted],
                 "queue": [asdict(q) for q in self.queue[-self.MAX_QUEUE:]],
+                "seerr_requests": [asdict(row) for row in self.seerr_requests],
             }
         self.path.parent.mkdir(parents=True, exist_ok=True)
         # Atomic: a crash mid-write would otherwise leave truncated JSON and
@@ -427,6 +445,146 @@ class Store:
     def queue_rows(self) -> list[dict]:
         with self._lock:
             return [asdict(q) for q in self.queue]
+
+    # -- SeerrNG request identities --------------------------------------
+
+    def get_seerr_request(self, external_request_id: str) -> SeerrRequest | None:
+        with self._lock:
+            return next(
+                (row for row in self.seerr_requests
+                 if row.external_request_id == external_request_id),
+                None,
+            )
+
+    def put_seerr_request(self, row: SeerrRequest) -> SeerrRequest:
+        with self._lock:
+            for index, current in enumerate(self.seerr_requests):
+                if current.external_request_id == row.external_request_id:
+                    self.seerr_requests[index] = row
+                    break
+            else:
+                self.seerr_requests.append(row)
+            if len(self.seerr_requests) > self.MAX_SEERR_REQUESTS:
+                excess = len(self.seerr_requests) - self.MAX_SEERR_REQUESTS
+                terminal = {"available", "failed", "cancelled"}
+                retention_cutoff = (
+                    datetime.now(timezone.utc) - timedelta(days=90)
+                ).isoformat(timespec="seconds")
+                retained = []
+                for current in self.seerr_requests:
+                    if (
+                        excess
+                        and current.status in terminal
+                        and current.updated_at < retention_cutoff
+                    ):
+                        excess -= 1
+                        continue
+                    retained.append(current)
+                self.seerr_requests = retained
+        self.save()
+        return row
+
+    def update_seerr_request(self, external_request_id: str, *, status: str,
+                              error: str = "",
+                              only_if_not_cancelled: bool = False) -> SeerrRequest | None:
+        with self._lock:
+            row = next(
+                (item for item in self.seerr_requests
+                 if item.external_request_id == external_request_id),
+                None,
+            )
+            if row is None:
+                return None
+            if only_if_not_cancelled and row.status == "cancelled":
+                return row
+            row.status = status
+            row.error = error
+            row.updated_at = now_iso()
+        self.save()
+        return row
+
+    def mark_seerr_dispatching(self, external_request_id: str) -> bool:
+        """Claim the handoff so cancellation cannot race the downloader add."""
+        with self._lock:
+            row = next(
+                (item for item in self.seerr_requests
+                 if item.external_request_id == external_request_id),
+                None,
+            )
+            if row is None or row.status == "cancelled":
+                return False
+            row.status = "dispatching"
+            row.error = ""
+            row.updated_at = now_iso()
+        self.save()
+        return True
+
+    def cancel_seerr_request(
+        self, external_request_id: str, confirm_no_existing_download: bool = False
+    ) -> str:
+        """Cancel before dispatch, or require queue confirmation after recovery."""
+        with self._lock:
+            row = next(
+                (item for item in self.seerr_requests
+                 if item.external_request_id == external_request_id),
+                None,
+            )
+            if row is None:
+                return "missing"
+            if row.status == "cancelled":
+                return "cancelled"
+            if row.status == "available":
+                return "available"
+            if (
+                row.error.startswith("The server restarted during download handoff.")
+                and not confirm_no_existing_download
+            ):
+                return "confirmation"
+            request_queue = [
+                item for item in self.queue
+                if item.external_request_id == external_request_id
+            ]
+            if any(item.state == "imported" for item in request_queue):
+                return "available"
+            if row.status in ("dispatching", "downloading") or any(
+                item.state in ("queued", "grabbed") for item in request_queue
+            ):
+                return "active"
+            row.status = "cancelled"
+            row.error = ""
+            row.updated_at = now_iso()
+        self.save()
+        return "cancelled"
+
+    def recover_seerr_dispatches(self) -> None:
+        """Reconcile a process interruption during download-client handoff."""
+        changed = False
+        with self._lock:
+            for request in self.seerr_requests:
+                if request.status != "dispatching":
+                    continue
+                rows = [
+                    item for item in self.queue
+                    if item.external_request_id == request.external_request_id
+                ]
+                latest = rows[-1] if rows else None
+                if latest and latest.state == "grabbed":
+                    request.status, request.error = "downloading", ""
+                elif latest and latest.state == "imported":
+                    request.status, request.error = "available", ""
+                elif latest and latest.state in ("failed", "import-failed"):
+                    request.status = "failed"
+                    request.error = latest.detail or "ROMarr could not complete the request."
+                else:
+                    request.status = "failed"
+                    request.error = (
+                        "The server restarted during download handoff. Check the "
+                        "download client's queue and history before retrying."
+                    )
+                request.updated_at = now_iso()
+                changed = True
+        if changed:
+            self.save()
 
     # -- per-game shelf state ------------------------------------------------
     #

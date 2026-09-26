@@ -258,6 +258,32 @@ library root, and an existing ROM is never silently overwritten.
 
 ---
 
+## SeerrNG software requests
+
+ROMarrNG exposes an authenticated integration contract for SeerrNG. Configure
+the SeerrNG integration API key in SeerrNG; requests then use ROMarr's normal
+platform matching, Prowlarr/direct indexer search, download-client handoff,
+verification, and library import.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/integration/ping` | Report the integration API version. |
+| `POST` | `/api/v1/integration/requests` | Idempotently create a request using `externalRequestId`, `game`, and `platform`. |
+| `GET` | `/api/v1/integration/requests/{externalRequestId}` | Read provider status and whether a local file can be delivered. |
+| `POST` | `/api/v1/integration/requests/{externalRequestId}/retry` | Retry failed acquisition. After an interrupted handoff, require `confirmNoExistingDownload: true` after checking the download client's queue and history. |
+| `POST` | `/api/v1/integration/requests/{externalRequestId}/cancel` | Cancel while the request is searching and before a transfer is handed to a download client. After an interrupted handoff, provide `confirmNoExistingDownload: true` only after checking the download client's queue and history. |
+| `GET` | `/api/v1/integration/requests/{externalRequestId}/assets` | List request-scoped files found under a configured local library root. |
+| `GET` | `/api/v1/integration/requests/{externalRequestId}/assets/{assetId}` | Stream a local asset, including HTTP byte ranges. |
+
+Request IDs are durable and repeated creation is safe. ROMarr can stop a
+request before downloader handoff; after handoff, stop the transfer in ROMarr
+or the download client. The status API returns `409` when a transfer is active
+or the title is already available. Asset responses contain opaque IDs, names,
+and sizes, never server filesystem paths. Remote libraries may report a title
+as available without exposing a downloadable local file.
+
+---
+
 ## Installation
 
 **[docs/INSTALL.md](docs/INSTALL.md) is the full guide** — every install path,
