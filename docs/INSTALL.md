@@ -69,7 +69,7 @@ docker run -d --name romarr \
   -p 6868:6868 \
   -e PUID=1000 -e PGID=1000 -e UMASK=002 -e TZ=Etc/UTC \
   -v /srv/romarr/config:/config \
-  ghcr.io/blizzhacker/romarr:latest
+  ghcr.io/snapetech/romarrng:latest
 ```
 
 Open <http://localhost:6868> and set a password.
@@ -729,7 +729,7 @@ pinned:
 
 ```bash
 docker compose down
-# in docker-compose.yml:  image: ghcr.io/blizzhacker/romarr:sha-5cb6a75
+# in docker-compose.yml:  image: ghcr.io/snapetech/romarrng:sha-<commit>
 docker compose up -d
 ```
 

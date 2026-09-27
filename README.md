@@ -264,6 +264,8 @@ ROMarrNG exposes an authenticated integration contract for SeerrNG. Configure
 the SeerrNG integration API key in SeerrNG; requests then use ROMarr's normal
 platform matching, Prowlarr/direct indexer search, download-client handoff,
 verification, and library import.
+The fork's container is `ghcr.io/snapetech/romarrng:latest`; the upstream
+`ghcr.io/blizzhacker/romarr` image does not include this integration contract.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
@@ -302,7 +304,7 @@ docker run -d --name romarr \
   -p 6868:6868 \
   -e PUID=1000 -e PGID=1000 -e UMASK=002 -e TZ=Etc/UTC \
   -v /srv/romarr/config:/config \
-  ghcr.io/blizzhacker/romarr:latest
+  ghcr.io/snapetech/romarrng:latest
 ```
 
 Open `http://localhost:6868` and set a password.

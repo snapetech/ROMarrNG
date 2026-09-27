@@ -19,7 +19,8 @@ brand, and changing them breaks existing installs:
   * `ROMARR_DATA` / `ROMARR_PORT`
   * `/opt/romarr`, `romarr.service`, `romarr.json`
   * the default download category `romarr`
-  * the image name `ghcr.io/blizzhacker/romarr` (OCI requires lowercase)
+  * the upstream image name `ghcr.io/blizzhacker/romarr` (separate from this
+    fork's `ghcr.io/snapetech/romarrng` image)
 """
 
 import io

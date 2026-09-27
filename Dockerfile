@@ -104,9 +104,9 @@ EXPOSE 6868
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import os,urllib.request;urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('ROMARR_PORT','6868')+'/api/health',timeout=4)"
 
-LABEL org.opencontainers.image.title="ROMarr" \
-      org.opencontainers.image.description="The *arr for games: request a ROM, ROMarr finds it via Prowlarr, grabs it, and files it into your game library" \
-      org.opencontainers.image.source="https://github.com/BlizzHacker/romarr" \
+LABEL org.opencontainers.image.title="ROMarrNG" \
+      org.opencontainers.image.description="ROMarrNG adds a SeerrNG request and library contract to ROMarr" \
+      org.opencontainers.image.source="https://github.com/snapetech/ROMarrNG" \
       org.opencontainers.image.licenses="MIT"
 
 ENTRYPOINT ["/entrypoint.sh"]
