@@ -653,6 +653,7 @@ a manual grab goes through the same queue, history and wanted handling.
 | Endpoint | Description |
 |---|---|
 | `GET /api/v1/game` | The library |
+| `POST /api/v1/integration/library/lookup` | Look up 1–100 `{title, platform}` pairs for SeerrNG; returns `ready`, `partial`, and exact `matches` from the cached library. |
 | `GET /api/v1/wanted/missing` | Requested, not yet imported |
 | `GET /api/v1/queue` | In flight |
 | `GET /api/v1/history` | What happened |

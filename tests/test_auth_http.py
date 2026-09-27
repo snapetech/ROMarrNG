@@ -17,6 +17,7 @@ from http.server import ThreadingHTTPServer
 import pytest
 
 from romarr.app import ROMarr, make_handler
+from romarr.libraries import Game
 
 
 @pytest.fixture
@@ -79,6 +80,28 @@ def test_a_wrong_key_is_refused(server):
     base, _ = server
     code, _, _ = get(base + "/api/v1/game", key="wrong")
     assert code == 401
+
+
+def test_seerrng_library_lookup_is_bounded_and_distinguishes_partial_cache(server):
+    base, service = server
+    route = base + "/api/v1/integration/library/lookup"
+    payload = {"titles": [
+        {"title": "Super Metroid", "platform": "snes"},
+        {"title": "Missing Game", "platform": "snes"},
+    ]}
+    code, _, _ = get(route, method="POST", body=payload)
+    assert code == 401
+    service._publish_library(
+        [Game(id="1", name="Super Metroid", platform="snes")],
+        "", partial=True)
+    code, body, _ = get(route, key="testkey", method="POST", body=payload)
+    assert code == 200
+    result = json.loads(body)
+    assert result == {"ready": True, "partial": True,
+                      "matches": [{"title": "Super Metroid", "platform": "snes"}]}
+    code, _, _ = get(route, key="testkey", method="POST",
+                     body={"titles": [{"title": "x", "platform": "invalid"}]})
+    assert code == 400
 
 
 def test_writing_needs_a_key(server):

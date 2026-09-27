@@ -161,6 +161,30 @@ def _seerr_title_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", without_marks)
 
 
+def _seerr_library_lookup(service, titles: list[dict]) -> dict:
+    games, _, _ = service._library_cache
+    if games is None:
+        return {"ready": False, "partial": False, "matches": []}
+    requested = {
+        (item["platform"], _seerr_title_key(item["title"])):
+        {"title": item["title"], "platform": item["platform"]}
+        for item in titles
+    }
+    matches = {}
+    for game in games:
+        platform = resolve(game.platform)
+        if platform is None:
+            continue
+        key = (platform.slug, _seerr_title_key(game.name))
+        if key in requested:
+            matches[key] = requested[key]
+            if len(matches) == len(requested):
+                break
+    return {"ready": True,
+            "partial": bool(service._library_partial),
+            "matches": list(matches.values())}
+
+
 def _seerr_library_matches(service, request: SeerrRequest) -> list[dict]:
     try:
         rows = service.library_view(q=request.game, limit=500).get("items", [])
@@ -5347,6 +5371,10 @@ def make_handler(service: ROMarr):
         def _post(self):
             route = urlparse(self.path)
             length = int(self.headers.get("Content-Length") or 0)
+            if (route.path == "/api/v1/integration/library/lookup"
+                    and length > 65536):
+                self._discard(length)
+                return self._json(413, {"error": "lookup body too large"})
             # The capture body is assembled by a web page, so its size is
             # checked before it is read rather than after. `read(length)` on a
             # declared gigabyte allocates a gigabyte first and refuses second,
@@ -5378,6 +5406,23 @@ def make_handler(service: ROMarr):
                 body = json.loads(self.rfile.read(length) or b"{}")
             except json.JSONDecodeError:
                 return self._json(400, {"error": "invalid json"})
+
+            if route.path == "/api/v1/integration/library/lookup":
+                titles = body.get("titles") if isinstance(body, dict) else None
+                if not isinstance(titles, list) or not 1 <= len(titles) <= 100:
+                    return self._json(400, {"error": "provide 1 to 100 titles"})
+                parsed = []
+                for item in titles:
+                    if not isinstance(item, dict):
+                        return self._json(400, {"error": "invalid title"})
+                    title = item.get("title")
+                    platform = item.get("platform")
+                    resolved = resolve(platform) if isinstance(platform, str) else None
+                    if (not isinstance(title, str) or not title.strip()
+                            or len(title) > 500 or resolved is None):
+                        return self._json(400, {"error": "invalid title or platform"})
+                    parsed.append({"title": title.strip(), "platform": resolved.slug})
+                return self._json(200, _seerr_library_lookup(service, parsed))
 
             if route.path == "/api/v1/integration/requests":
                 if not isinstance(body, dict):

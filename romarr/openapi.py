@@ -44,6 +44,10 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
                             "origin and source."),
     "/api/v1/integration/ping": ("GET", "Authenticated version handshake for "
                                          "SeerrNG software requests."),
+    "/api/v1/integration/library/lookup": ("POST", "Bounded title and platform "
+                                             "lookup against the cached ROM library. "
+                                             "Returns readiness, partial-cache state, "
+                                             "and exact matches without file paths."),
     "/api/v1/integration/requests": ("POST", "Create an idempotent SeerrNG "
                                             "ROM request and start ROMarr's "
                                             "normal indexer search."),
@@ -357,6 +361,12 @@ def served_routes(source: str | None = None) -> set[str]:
     # exactly that with /api/v1/webhook.
     for group in re.findall(r'route\.path in \(([^)]*)\)', source):
         found.update(re.findall(r'"(/[^"]*)"', group))
+    # The SeerrNG request routes split a validated path suffix rather than
+    # comparing each concrete URL against route.path.
+    if ('seerr_prefix = "/api/v1/integration/requests/"' in source
+            and 'route.path.startswith(seerr_prefix)' in source):
+        found.update(path for path in DESCRIPTIONS
+                     if path.startswith("/api/v1/integration/requests/"))
     return found
 
 
