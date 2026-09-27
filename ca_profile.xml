@@ -2,5 +2,5 @@
 <CommunityApplications>
   <Profile>ROMarrNG is a standalone ROM discovery, acquisition, and library manager. This Snapetech NG fork also provides optional SeerrNG request and library integration. SeerrNG is not required to use ROMarrNG.</Profile>
   <WebPage>https://github.com/snapetech/ROMarrNG</WebPage>
-  <Forum>https://github.com/snapetech/ROMarrNG/issues</Forum>
+  <Forum>https://github.com/snapetech/seerrng/issues</Forum>
 </CommunityApplications>

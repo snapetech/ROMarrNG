@@ -9,7 +9,7 @@
   <WebUI>http://[IP]:[PORT:6868]/</WebUI>
   <Overview>Standalone NG fork of ROMarr for ROM discovery and acquisition, with optional SeerrNG integration.</Overview>
   <Description>ROMarrNG is a complete standalone ROM manager; SeerrNG is optional. This Snapetech NG fork includes SeerrNG request and library APIs. The default folder library uses the mapped /roms path and needs no separate library server. Open ROMarrNG to set its password, indexers, and download client, then configure its API key in SeerrNG if desired.</Description>
-  <Support>https://github.com/snapetech/ROMarrNG/issues</Support>
+  <Support>https://github.com/snapetech/seerrng/issues</Support>
   <Project>https://github.com/snapetech/ROMarrNG</Project>
   <TemplateURL>https://raw.githubusercontent.com/snapetech/ROMarrNG/main/packaging/unraid/romarrng.xml</TemplateURL>
   <ReadMe>https://github.com/snapetech/ROMarrNG/blob/main/README.md</ReadMe>

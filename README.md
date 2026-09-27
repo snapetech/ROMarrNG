@@ -14,9 +14,9 @@ Move Weight
 
 ROMarr runs perfectly well on its own — nothing above it is required.
 
-On Unraid, the [ROMarrNG fork template](packaging/unraid/romarrng.xml) and
-[SeerrNG companion template](https://github.com/snapetech/seerrng/blob/main/packaging/unraid/romarrng.xml)
-both install the standalone `ghcr.io/snapetech/romarrng:latest` image. Connect
+On Unraid, the [ROMarrNG fork template](packaging/unraid/romarrng.xml) installs
+the standalone `ghcr.io/snapetech/romarrng:latest` image. It is the canonical
+ROMarrNG Unraid template; SeerrNG does not include another copy. Connect
 SeerrNG only if you want its request and catalog integration.
 
 [ROM Hub](https://github.com/BlizzHacker/rom-hub) is ROMarr's plugin factory:
