@@ -30,9 +30,9 @@ services:
       - dbhost=gaseousdb
       - dbuser=root
       - dbpass=${GASEOUS_DB_PASSWORD:-gaseous}
-      # Only needed if you want Gaseous to enrich metadata from IGDB. ROMarr
-      # never reads IGDB, and the backend answers all four of its questions
-      # with these empty -- verified 2026-07-29.
+      # Only needed if you want Gaseous to enrich metadata from IGDB. These
+      # variables do not configure ROMarrNG's optional catalog. The backend
+      # answers all four of its questions with these empty -- verified 2026-07-29.
       - igdbclientid=${IGDB_CLIENT_ID:-}
       - igdbclientsecret=${IGDB_CLIENT_SECRET:-}
     volumes: ["gaseous_data:/home/gaseous/.gaseous-server"]

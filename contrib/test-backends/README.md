@@ -70,12 +70,14 @@ Worth knowing before you bump:
   field numbers are what `RetromLibrary` decodes.
 * The Postgres and MariaDB digests are incidental and safe to bump.
 
-IGDB credentials are optional. Gaseous starts, reports healthy, and answers all
-four of ROMarr's questions with `igdbclientid` and `igdbclientsecret` empty —
-ROMarr never reads IGDB. It will fill its log with Twitch OAuth 400s while
-trying to enrich platform metadata, which is noise, not failure. Set them in
-`.env` (see `.env.example`) only if you are specifically testing Gaseous
-metadata.
+IGDB credentials are optional for this fixture. Gaseous starts, reports
+healthy, and answers all four of ROMarr's library questions with
+`igdbclientid` and `igdbclientsecret` empty — verified 2026-07-29. It fills
+its log with Twitch OAuth 400s while trying to enrich platform metadata, which
+is noise, not failure. These environment variables configure Gaseous only;
+ROMarrNG's optional IGDB catalog is configured separately under **Settings >
+Metadata Providers**. Set them in `.env` (see `.env.example`) only if you are
+specifically testing Gaseous metadata.
 
 ## Findings from the last run — 2026-07-29
 
