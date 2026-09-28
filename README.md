@@ -542,8 +542,9 @@ Folder dumps require their executable and platform metadata: PS4/Vita use
 and publish it only after copying succeeds. Folder libraries recognize each
 complete dump as one game. SeerrNG request delivery offers a complete TAR
 stream rather than a partial file list; it uses bounded buffers and no
-temporary archive. TAR streams do not support resuming; individual package
-files retain byte ranges. Trees beyond 10,000 files or the traversal bounds
+temporary archive. TAR streams and individual package files support byte-range
+resume; archive ranges seek past earlier game files without reading them.
+Trees beyond 10,000 files or the traversal bounds
 are not offered as downloadable bundles. Checksum verification remains
 unknown unless a configured DAT identifies the bytes.
 

@@ -36,10 +36,12 @@ def server(tmp_path):
     httpd.server_close()
 
 
-def get(url, key=None, cookie=None, method="GET", body=None):
+def get(url, key=None, cookie=None, method="GET", body=None, byte_range=None):
     request = urllib.request.Request(url, method=method)
     if key:
         request.add_header("X-Api-Key", key)
+    if byte_range:
+        request.add_header("Range", byte_range)
     if cookie:
         request.add_header("Cookie", cookie)
     if body is not None:
@@ -516,4 +518,9 @@ def test_complete_game_bundle_is_authenticated_and_request_scoped(server, tmp_pa
     with tarfile.open(fileobj=io.BytesIO(body)) as archive:
         assert len(archive.getnames()) == 120
         assert archive.extractfile("assets/119.bin").read() == b"game"
+    status, resumed, headers = get(download, key="testkey", byte_range="bytes=1024-2047")
+    assert status == 206
+    assert resumed == body[1024:2048]
+    assert headers["Content-Range"] == f"bytes 1024-2047/{len(body)}"
+    assert get(download, key="testkey", byte_range=f"bytes={len(body)}-")[0] == 416
     assert get(download.replace("seerr-1", "seerr-2"), key="testkey")[0] == 404

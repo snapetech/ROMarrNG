@@ -6,7 +6,7 @@ import pytest
 
 from romarr.app import ROMarr, _seerr_local_assets, _seerr_library_lookup
 from romarr.dat import hash_bytes, hash_stream
-from romarr.game_assets import directory_asset, stream_directory
+from romarr.game_assets import bundle_range, directory_asset, stream_directory
 from romarr.libraries import FolderConfig, FolderLibrary
 from romarr.library import import_rom, is_safe_name
 from romarr.platforms import by_slug, resolve
@@ -138,6 +138,63 @@ def test_directory_bundle_contains_more_than_one_hundred_files(tmp_path):
     with tarfile.open(fileobj=io.BytesIO(output.getvalue())) as archive:
         assert len(archive.getnames()) == 120
         assert archive.extractfile("assets/119.bin").read() == b"game data"
+
+
+def test_bundle_bytes_and_ranges_match_tarfile_exactly(tmp_path):
+    game = tmp_path / "Game"
+    for name in ("one.bin", "long-" * 30 + "/é.bin", "empty.bin"):
+        path = game / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"" if name == "empty.bin" else b"game" * 300)
+    asset = directory_asset(game, tmp_path)
+    reference = io.BytesIO()
+    with tarfile.open(fileobj=reference, mode="w|", format=tarfile.PAX_FORMAT) as archive:
+        for path, info, _ in asset["members"]:
+            with path.open("rb") as handle:
+                archive.addfile(info, handle)
+    expected = reference.getvalue()
+    full = io.BytesIO()
+    stream_directory(asset, full)
+    assert full.getvalue() == expected
+    for first, last in ((0, 99), (510, 530), (1024, 2500),
+                        (len(expected) - 20, len(expected) - 1)):
+        output = io.BytesIO()
+        stream_directory(asset, output, start=first, end=last)
+        assert output.getvalue() == expected[first:last + 1]
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("", (0, 999, 200)), ("bytes=20-30", (20, 30, 206)),
+    ("bytes=20-", (20, 999, 206)), ("bytes=-20", (980, 999, 206)),
+    ("bytes=0-2000", (0, 999, 206)), ("bytes=-2000", (0, 999, 206)),
+])
+def test_bundle_range_forms(value, expected):
+    assert bundle_range(value, 1000) == expected
+
+
+@pytest.mark.parametrize("value", [
+    "bytes=-", "bytes=-0", "bytes=1000-", "bytes=30-20",
+    "bytes=0-1,3-4", "other=0-1", "bytes=" + "1" * 300 + "-",
+])
+def test_bundle_invalid_ranges_are_refused(value):
+    with pytest.raises(ValueError):
+        bundle_range(value, 1000)
+
+
+def test_resume_seeks_over_earlier_game_data(tmp_path):
+    game = tmp_path / "Game"
+    game.mkdir()
+    first = game / "a.bin"
+    first.write_bytes(b"a" * 2000000)
+    second = game / "b.bin"
+    second.write_bytes(b"b" * 100)
+    asset = directory_asset(game, tmp_path)
+    # It should not reopen the earlier file when resuming in a later member.
+    first.unlink()
+    second_offset = 512 + ((2000000 + 511) // 512) * 512 + 512
+    output = io.BytesIO()
+    stream_directory(asset, output, start=second_offset, end=second_offset + 99)
+    assert output.getvalue() == b"b" * 100
 
 
 def test_bundle_skips_symlinks_and_refuses_changed_files(tmp_path):

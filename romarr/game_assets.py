@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import stat
 import tarfile
 from pathlib import Path
@@ -56,10 +57,48 @@ def directory_asset(source: Path, root: Path) -> dict | None:
             "path": source, "members": members}
 
 
-def stream_directory(asset: dict, output) -> None:
-    """Tar streams use bounded buffers and preserve every relative path."""
-    with tarfile.open(fileobj=output, mode="w|", format=tarfile.PAX_FORMAT) as archive:
-        for path, info, snapshot in asset["members"]:
+def bundle_range(value: str, size: int) -> tuple[int, int, int]:
+    if not value:
+        return 0, size - 1, 200
+    if len(value) > 256:
+        raise ValueError("invalid range")
+    match = re.fullmatch(r"bytes=(\d*)-(\d*)", value.strip())
+    if not match or not any(match.groups()):
+        raise ValueError("invalid range")
+    first, last = match.groups()
+    if first:
+        start = int(first)
+        end = min(size - 1, int(last)) if last else size - 1
+    else:
+        suffix = int(last)
+        if suffix <= 0:
+            raise ValueError("invalid range")
+        start, end = max(0, size - suffix), size - 1
+    if start >= size or end < start:
+        raise ValueError("unsatisfiable range")
+    return start, end, 206
+
+
+def stream_directory(asset: dict, output, *, start=0, end=None) -> None:
+    """Stream a deterministic TAR or range, seeking over unrequested bytes."""
+    end = asset["size"] - 1 if end is None else end
+    position = 0
+
+    def write_segment(data):
+        nonlocal position
+        first = max(0, start - position)
+        last = min(len(data), end - position + 1)
+        if first < last:
+            output.write(data[first:last])
+        position += len(data)
+
+    for path, info, snapshot in asset["members"]:
+        if position > end:
+            return
+        write_segment(info.tobuf(format=tarfile.PAX_FORMAT))
+        first = max(0, start - position)
+        last = min(info.size, end - position + 1)
+        if first < last:
             fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
             with os.fdopen(fd, "rb") as handle:
                 current = os.fstat(handle.fileno())
@@ -67,4 +106,15 @@ def stream_directory(asset: dict, output) -> None:
                         snapshot.st_dev, snapshot.st_ino,
                         snapshot.st_size, snapshot.st_mtime_ns):
                     raise OSError("game files changed during download")
-                archive.addfile(info, handle)
+                handle.seek(first)
+                remaining = last - first
+                while remaining:
+                    data = handle.read(min(1024 * 1024, remaining))
+                    if not data:
+                        raise OSError("game file ended during download")
+                    output.write(data)
+                    remaining -= len(data)
+        position += info.size
+        write_segment(b"\0" * ((-info.size) % 512))
+    # Two EOF blocks and record padding, byte-for-byte like tarfile's stream.
+    write_segment(b"\0" * (asset["size"] - position))

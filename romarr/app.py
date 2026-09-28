@@ -65,7 +65,7 @@ from .downloaders import (
 from .indexers import INDEXER_TYPES, build_indexer, redact_indexer
 from .indexers import Prowlarr, ProwlarrConfig
 from .library import import_rom, map_remote_path
-from .game_assets import directory_asset, stream_directory
+from .game_assets import bundle_range, directory_asset, stream_directory
 from .collections import is_translation
 from .auth import DISABLED as AUTH_DISABLED
 from .auth import MIN_PASSWORD, SESSION_COOKIE, Auth, new_api_key, parse_cookies
@@ -4889,14 +4889,26 @@ def make_handler(service: ROMarr):
                     if asset is None:
                         return self._json(404, {"error": "asset not found"})
                     if "members" in asset:
-                        self.send_response(200)
+                        try:
+                            start, end, status = bundle_range(
+                                self.headers.get("Range", ""), asset["size"])
+                        except ValueError:
+                            self.send_response(416)
+                            self.send_header("Content-Range", f"bytes */{asset['size']}")
+                            self.send_header("Content-Length", "0")
+                            self.end_headers()
+                            return None
+                        self.send_response(status)
                         self.send_header("Content-Type", "application/x-tar")
-                        self.send_header("Content-Length", str(asset["size"]))
+                        self.send_header("Content-Length", str(end - start + 1))
+                        self.send_header("Accept-Ranges", "bytes")
+                        if status == 206:
+                            self.send_header("Content-Range", f"bytes {start}-{end}/{asset['size']}")
                         self.send_header("Content-Disposition",
                                          "attachment; filename*=UTF-8''" + quote(asset["name"]))
                         self.end_headers()
                         try:
-                            stream_directory(asset, self.wfile)
+                            stream_directory(asset, self.wfile, start=start, end=end)
                         except (OSError, ValueError, tarfile.TarError):
                             self.close_connection = True
                         return None
