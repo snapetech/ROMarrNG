@@ -141,6 +141,9 @@ class SeerrRequest:
     external_request_id: str
     game: str
     platform: str
+    catalog_provider: str = ""
+    catalog_id: int = 0
+    platform_id: int = 0
     status: str = "accepted"
     error: str = ""
     updated_at: str = field(default_factory=now_iso)

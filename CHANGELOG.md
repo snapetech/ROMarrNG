@@ -14,11 +14,17 @@ release's versioned image is `ghcr.io/snapetech/romarrng:0.10.0`.
 - SeerrNG can search ROMarrNG's game catalog, track acquisition requests, and
   retrieve request-scoped game files. Complete game archive downloads can
   resume after an interrupted transfer.
+- The IGDB catalog can be filtered by platform, genre, and release year, and
+  SeerrNG requests retain their catalog game and selected platform identity.
+- Operators can check Prowlarr's management API and enabled indexer feeds
+  separately when diagnosing search failures; diagnostics omit credentials and
+  feed URLs.
 - PS4, PS5, Vita, Xbox One, and Xbox Series requests can use the existing
   acquisition workflow for supported packages or folder dumps. In SeerrNG,
   assign these systems to **Modern** before requesting them.
 - The Unraid Community Applications listing now has a ROMarrNG icon and
-  setup guidance for storage paths and support.
+  setup guidance for storage paths and support. The icon URL is versioned so
+  Community Applications can refresh a previously cached blank result.
 
 ### Fixed
 

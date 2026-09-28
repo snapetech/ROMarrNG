@@ -44,6 +44,30 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
                             "origin and source."),
     "/api/v1/integration/ping": ("GET", "Authenticated version handshake for "
                                          "SeerrNG software requests."),
+    "/api/integration/seerrng/v1/ping": ("GET", "Canonical version and capability handshake for SeerrNG software requests."),
+    "/api/integration/seerrng/v1/catalog/platforms": ("GET", "IGDB catalog platforms with stable numeric IDs."),
+    "/api/integration/seerrng/v1/catalog/search": ("GET", "Search the configured IGDB catalog."),
+    "/api/integration/seerrng/v1/catalog/search-page": ("GET", "Search IGDB with stable cursor pagination and optional platform, genre and year filters."),
+    "/api/integration/seerrng/v1/catalog/popular": ("GET", "Popular IGDB titles."),
+    "/api/integration/seerrng/v1/catalog/popular-page": ("GET", "Popular IGDB titles with offset pagination and optional filters."),
+    "/api/integration/seerrng/v1/catalog/games/{igdbId}": ("GET", "Read one IGDB title by its stable numeric identity."),
+    "/api/integration/seerrng/v1/library/lookup": ("POST", "Look up SeerrNG emulation requests against the local ROM library."),
+    "/api/integration/seerrng/v1/requests": ("POST", "Idempotently create a SeerrNG emulation request with its IGDB game and platform identity."),
+    "/api/integration/seerrng/v1/requests/{externalRequestId}": ("GET", "Read request status, stable catalog identity and available actions."),
+    "/api/integration/seerrng/v1/requests/{externalRequestId}/retry": ("POST", "Retry a failed request when its advertised actions allow it."),
+    "/api/integration/seerrng/v1/requests/{externalRequestId}/cancel": ("POST", "Cancel a request when its advertised actions allow it."),
+    "/api/integration/seerrng/v1/requests/{externalRequestId}/assets": ("GET", "List local assets for a SeerrNG request."),
+    "/api/integration/seerrng/v1/requests/{externalRequestId}/assets/{assetId}": ("GET", "Stream a request asset with HTTP byte-range support."),
+    "/api/v1/integration/catalog/platforms": ("GET", "IGDB platform IDs and "
+                                                       "names for catalog filters."),
+    "/api/v1/integration/catalog/search": ("GET", "Search the IGDB game catalog."),
+    "/api/v1/integration/catalog/search-page": ("GET", "Page through IGDB "
+                                                           "game search results."),
+    "/api/v1/integration/catalog/popular": ("GET", "List popular IGDB games."),
+    "/api/v1/integration/catalog/popular-page": ("GET", "Page through popular "
+                                                            "IGDB games."),
+    "/api/v1/integration/catalog/games/{igdbId}": ("GET", "Read one IGDB game "
+                                                                  "with platform and media details."),
     "/api/v1/integration/library/lookup": ("POST", "Bounded title and platform "
                                              "lookup against the cached ROM library. "
                                              "Returns readiness, partial-cache state, "
@@ -299,6 +323,8 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
                                      "interactive search."),
     "/api/v1/indexer": ("GET", "Configured indexers, with keys masked."),
     "/api/v1/indexer/test": ("POST", "Test one indexer's connection."),
+    "/api/v1/indexer/diagnose": ("POST", "Check Prowlarr's management API "
+                                               "and each enabled indexer feed."),
     "/api/v1/downloadclient": ("GET", "Configured download clients."),
     # Counted, not stated: this said "five" while there were eight, and would
     # have said eight the moment a ninth landed. A description that drifts is
@@ -363,6 +389,16 @@ def served_routes(source: str | None = None) -> set[str]:
             and 'route.path.startswith(seerr_prefix)' in source):
         found.update(path for path in DESCRIPTIONS
                      if path.startswith("/api/v1/integration/requests/"))
+    if ('seerr_prefix = "/api/integration/seerrng/v1"' in source
+            and 'route.path.startswith(seerr_prefix' in source):
+        found.update(path for path in DESCRIPTIONS
+                     if path.startswith("/api/integration/seerrng/v1/"))
+    if ('catalog_game_prefix = "/api/v1/integration/catalog/games/"' in source
+            and 'route.path.startswith(catalog_game_prefix)' in source):
+        found.add("/api/v1/integration/catalog/games/{igdbId}")
+    if 'catalog_routes = {' in source and 'route.path in catalog_routes' in source:
+        found.update(path for path in DESCRIPTIONS
+                     if path.startswith("/api/v1/integration/catalog/"))
     return found
 
 
@@ -392,12 +428,12 @@ def spec(version: str = "0.0.0", *, base_url: str = "") -> dict:
     return {
         "openapi": VERSION,
         "info": {
-            "title": "ROMarr",
+            "title": "ROMarrNG",
             "version": version,
             "description": (
-                "The *arr for games. Request a ROM, ROMarr finds it, grabs "
-                "it, verifies it against a No-Intro or Redump DAT, and files "
-                "it into your library.\n\n"
+                "The *arr for games. Request a ROM, ROMarrNG searches for it, "
+                "grabs it, verifies it against a No-Intro or Redump DAT, and "
+                "files it into your library.\n\n"
                 "Every endpoint except `/`, `/api/health` and `/api/v1/login` "
                 "requires a credential: `X-Api-Key`, `Authorization: Bearer`, "
                 "or `?apikey=`."

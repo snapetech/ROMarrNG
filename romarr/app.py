@@ -82,7 +82,11 @@ from .notify import (NOTIFIERS, Message, Notifier, failed, grabbed, imported,
                      update_available)
 from .profiles import Blocklist, ReleaseProfile, release_id
 from .upgrade import is_upgrade, merge_tags, scan as scan_directory
-from .metadata import Metadata, calendar as metadata_calendar
+from .metadata import (
+    Metadata, calendar as metadata_calendar, igdb_catalog_config,
+    igdb_catalog_game, igdb_catalog_platforms, igdb_catalog_popular_page,
+    igdb_catalog_search,
+)
 from .metadata import discover as metadata_discover
 from .openapi import spec as openapi_spec
 from .ops import (LogRing, RateLimiter, make_backup, read_backup,
@@ -325,6 +329,18 @@ def _seerr_request_view(service, request: SeerrRequest) -> dict:
         "game": {"id": request.external_request_id,
                  "title": request.game, "status": status},
         "platform": request.platform,
+        "identity": ({"catalogProvider": request.catalog_provider,
+                      "catalogId": request.catalog_id,
+                      "platformId": request.platform_id}
+                     if request.catalog_id else None),
+        "actions": {
+            "retry": status == "failed",
+            "cancel": (status not in ("cancelled", "available", "downloading", "importing")
+                       and not (queue_item and queue_item.state in ("grabbed", "imported"))),
+            **({"cancelReason": "ROMarrNG has handed this request to the download client; cancel the transfer there."}
+               if status in ("downloading", "importing")
+               or (queue_item and queue_item.state in ("grabbed", "imported")) else {}),
+        },
     }
 
 
@@ -4841,6 +4857,10 @@ def make_handler(service: ROMarr):
         def _get(self):
             route = urlparse(self.path)
             query = parse_qs(route.query)
+            seerr_prefix = "/api/integration/seerrng/v1"
+            if route.path == seerr_prefix or route.path.startswith(seerr_prefix + "/"):
+                route = route._replace(
+                    path="/api/v1/integration" + route.path[len(seerr_prefix):])
             if route.path == "/link":
                 # Served before the sign-in check on purpose, and without
                 # consulting anything: the visitor is a stranger holding a
@@ -4872,12 +4892,103 @@ def make_handler(service: ROMarr):
 
             # --- *arr-shaped API ---------------------------------------
             if route.path == "/api/v1/integration/ping":
+                catalog = igdb_catalog_config(
+                    service.store.list_items("metadata_providers")) is not None
                 return self._json(200, {
-                    "service": "romarr",
+                    "service": "ROMarrNG",
                     "version": VERSION,
                     "apiVersion": 1,
                     "requestContractVersion": 1,
+                    "capabilities": {
+                        "catalog": catalog,
+                        "pcAcquisition": False,
+                        "emulationAcquisition": True,
+                        "requestActions": {"retry": True, "cancel": True},
+                        "assetStreaming": True,
+                    },
                 })
+            catalog_routes = {
+                "/api/v1/integration/catalog/platforms",
+                "/api/v1/integration/catalog/search",
+                "/api/v1/integration/catalog/search-page",
+                "/api/v1/integration/catalog/popular",
+                "/api/v1/integration/catalog/popular-page",
+            }
+            catalog_game_prefix = "/api/v1/integration/catalog/games/"
+            if route.path in catalog_routes or route.path.startswith(catalog_game_prefix):
+                cfg = igdb_catalog_config(
+                    service.store.list_items("metadata_providers"))
+                if cfg is None:
+                    return self._json(503, {"error": "IGDB catalog is not configured"})
+                if route.path == "/api/v1/integration/catalog/platforms":
+                    try:
+                        return self._json(200, igdb_catalog_platforms(cfg))
+                    except Exception:
+                        return self._json(502, {"error": "IGDB catalog request failed"})
+                if route.path.startswith(catalog_game_prefix):
+                    raw_id = route.path[len(catalog_game_prefix):]
+                    if not re.fullmatch(r"[1-9][0-9]{0,9}", raw_id):
+                        return self._json(400, {"error": "invalid catalog ID"})
+                    try:
+                        game = igdb_catalog_game(cfg, int(raw_id))
+                    except Exception:
+                        return self._json(502, {"error": "IGDB catalog request failed"})
+                    return self._json(200, game) if game else self._json(
+                        404, {"error": "catalog title not found"})
+
+                def catalog_filters():
+                    raw_platforms = (query.get("platformIds") or [""])[0]
+                    if raw_platforms and not re.fullmatch(r"[0-9,]{1,1200}", raw_platforms):
+                        raise ValueError("invalid platform IDs")
+                    platform_ids = ([int(value) for value in raw_platforms.split(",")]
+                                    if raw_platforms else [])
+                    if (len(platform_ids) > 100 or any(value <= 0 for value in platform_ids)
+                            or len(set(platform_ids)) != len(platform_ids)):
+                        raise ValueError("invalid platform IDs")
+                    genre = (query.get("genre") or [""])[0].strip()
+                    raw_year = (query.get("releaseYear") or [""])[0]
+                    if genre and len(genre) > 64:
+                        raise ValueError("invalid genre")
+                    year = int(raw_year) if raw_year else None
+                    if year is not None and not 1950 <= year <= 2200:
+                        raise ValueError("invalid release year")
+                    return platform_ids, genre, year
+
+                try:
+                    limit = int((query.get("limit") or ["20"])[0])
+                    if not 1 <= limit <= 50:
+                        raise ValueError("invalid catalog limit")
+                    platform_ids, genre, year = catalog_filters()
+                    if route.path in ("/api/v1/integration/catalog/search",
+                                      "/api/v1/integration/catalog/search-page"):
+                        term = (query.get("q") or [""])[0].strip()
+                        if not term or len(term) > 200:
+                            raise ValueError("a valid search query is required")
+                        raw_cursor = (query.get("cursor") or ["0"])[0]
+                        if not re.fullmatch(r"(?:0|[1-9][0-9]{0,4})", raw_cursor):
+                            raise ValueError("invalid catalog cursor")
+                        if int(raw_cursor) > 10000:
+                            raise ValueError("invalid catalog cursor")
+                        rows, next_offset = igdb_catalog_search(
+                            cfg, term, limit, int(raw_cursor), platform_ids, genre, year)
+                        if route.path.endswith("search"):
+                            return self._json(200, rows)
+                        return self._json(200, {
+                            "results": rows,
+                            "nextCursor": str(next_offset) if next_offset is not None else None,
+                        })
+                    offset = int((query.get("offset") or ["0"])[0])
+                    if not 0 <= offset <= 10000:
+                        raise ValueError("invalid catalog offset")
+                    rows, next_offset = igdb_catalog_popular_page(
+                        cfg, offset, platform_ids, limit, genre, year)
+                    if route.path.endswith("popular"):
+                        return self._json(200, rows)
+                    return self._json(200, {"results": rows, "nextOffset": next_offset})
+                except (TypeError, ValueError) as exc:
+                    return self._json(400, {"error": str(exc)[:160]})
+                except Exception:
+                    return self._json(502, {"error": "IGDB catalog request failed"})
             seerr_prefix = "/api/v1/integration/requests/"
             if route.path.startswith(seerr_prefix):
                 parts = route.path[len(seerr_prefix):].split("/")
@@ -5432,6 +5543,10 @@ def make_handler(service: ROMarr):
 
         def _post(self):
             route = urlparse(self.path)
+            seerr_prefix = "/api/integration/seerrng/v1"
+            if route.path == seerr_prefix or route.path.startswith(seerr_prefix + "/"):
+                route = route._replace(
+                    path="/api/v1/integration" + route.path[len(seerr_prefix):])
             length = int(self.headers.get("Content-Length") or 0)
             if (route.path == "/api/v1/integration/library/lookup"
                     and length > 65536):
@@ -5493,17 +5608,48 @@ def make_handler(service: ROMarr):
                 game = str(body.get("game") or "").strip()
                 requested_platform = str(body.get("platform") or "").strip()
                 platform = resolve(requested_platform)
+                if "identity" in body and not isinstance(body.get("identity"), dict):
+                    return self._json(400, {"error": "invalid catalog identity"})
+                identity = body.get("identity") if isinstance(body.get("identity"), dict) else {}
+                catalog_provider = str(identity.get("catalogProvider") or "").strip().lower()
+                catalog_id = identity.get("catalogId")
+                platform_id = identity.get("platformId", 0)
+                if catalog_provider:
+                    if (catalog_provider != "igdb"
+                            or not isinstance(catalog_id, int) or isinstance(catalog_id, bool)
+                            or not 1 <= catalog_id <= 9999999999
+                            or not isinstance(platform_id, int) or isinstance(platform_id, bool)
+                            or not 0 <= platform_id <= 9999999999):
+                        return self._json(400, {"error": "invalid catalog identity"})
+                else:
+                    if any(identity.get(key) is not None
+                           for key in ("catalogId", "platformId")):
+                        return self._json(400, {"error": "invalid catalog identity"})
+                    catalog_id = 0
+                    platform_id = 0
                 if (not re.fullmatch(r"[A-Za-z0-9._:-]{1,255}", external_id)
                         or not game or len(game) > 500 or platform is None):
                     return self._json(400, {
                         "error": "externalRequestId, game and a valid platform are required"})
                 existing = service.store.get_seerr_request(external_id)
                 if existing:
+                    same_identity = (
+                        existing.catalog_provider == catalog_provider
+                        and existing.catalog_id == (catalog_id or 0)
+                        and existing.platform_id == (platform_id or 0)
+                    )
+                    if (_seerr_title_key(existing.game) != _seerr_title_key(game)
+                            or existing.platform != platform.slug or not same_identity):
+                        return self._json(409, {
+                            "error": "externalRequestId is already bound to a different game or platform identity"})
                     return self._json(200, _seerr_request_view(service, existing))
                 row = SeerrRequest(
                     external_request_id=external_id,
                     game=game,
                     platform=platform.slug,
+                    catalog_provider=catalog_provider,
+                    catalog_id=catalog_id or 0,
+                    platform_id=platform_id or 0,
                     status="available" if _seerr_library_matches(
                         service,
                         SeerrRequest(external_id, game, platform.slug),
@@ -5529,6 +5675,8 @@ def make_handler(service: ROMarr):
                     current = _seerr_request_view(service, row)
                     if current["status"] == "cancelled":
                         return self._json(409, {"error": "cancelled requests cannot be retried"})
+                    if not current["actions"]["retry"]:
+                        return self._json(409, {"error": "request is not retryable in its current state"})
                     if current["status"] in ("searching", "downloading", "available"):
                         return self._json(200, current)
                     if (
@@ -5557,6 +5705,10 @@ def make_handler(service: ROMarr):
                     current = _seerr_request_view(service, row)
                     if current["status"] == "cancelled":
                         return self._json(200, current)
+                    if not current["actions"]["cancel"]:
+                        return self._json(409, {
+                            "error": current["actions"].get("cancelReason")
+                                    or "request cannot be cancelled in its current state"})
                     if current["status"] == "available":
                         return self._json(409, {"error": "available requests cannot be cancelled"})
                     outcome = service.store.cancel_seerr_request(
@@ -6137,6 +6289,16 @@ def make_handler(service: ROMarr):
             if route.path == "/api/v1/indexer/test":
                 existing = service.store.get_item("indexers", body.get("id"))                     if body.get("id") else None
                 return self._json(200, service.test_indexer(merge_secrets(dict(body), existing)))
+            if route.path == "/api/v1/indexer/diagnose":
+                try:
+                    result = service.prowlarr.diagnose()
+                    return self._json(200, result)
+                except Exception as exc:
+                    return self._json(200, {
+                        "management": {"success": False,
+                                       "error": f"Prowlarr diagnostics failed: {exc.__class__.__name__}."},
+                        "indexers": [],
+                    })
             if route.path in ("/api/v1/webhook", "/api/v1/webhook/ggrequestz"):
                 result = service.handle_request_webhook(body)
                 # GG Requestz treats every 2xx response as delivered and does

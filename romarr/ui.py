@@ -2652,15 +2652,49 @@ RENDER.indexers=async()=>{
   ${(d.proxied||[]).length?`<div class="card"><h3>Via Prowlarr</h3>
     <p class="help">Managed in Prowlarr, shown here read-only. Add or remove
       them there and they appear or disappear from this list.</p>
+    <div class="row" style="justify-content:flex-end;margin-bottom:10px">
+      <button class="btn ghost" id="i-diagnose">Test indexers</button></div>
     <table><thead><tr><th>Indexer</th><th>Protocol</th><th>Categories</th>
       <th>Enabled</th></tr></thead><tbody>
       ${d.proxied.map(i=>`<tr><td>${esc(i.name)}</td><td>${esc(i.protocol)}</td>
         <td style="color:var(--dim)">${esc((i.categories||[]).join(', ')||'—')}</td>
         <td><span class="dot ${i.enable?'up':'down'}"></span>${i.enable?'yes':'no'}</td>
-        </tr>`).join('')}</tbody></table></div>`
+        </tr>`).join('')}</tbody></table></div><div id="i-diagnostics"></div>`
     :(d.error?`<div class="card"><h3>Via Prowlarr</h3>
-        <p class="help" style="color:var(--warn)">${esc(d.error)}</p></div>`:'')}`;
+        <p class="help" style="color:var(--warn)">${esc(d.error)}</p>
+        <div class="row" style="justify-content:flex-end">
+          <button class="btn ghost" id="i-diagnose">Test indexers</button></div>
+        </div><div id="i-diagnostics"></div>`:'')}`;
   $('#i-add').onclick=()=>addItem('indexer');
+  const test=$('#i-diagnose');
+  if(test)test.onclick=async()=>{
+    test.disabled=true;test.textContent='Testing...';
+    try{
+      const report=await j('/api/v1/indexer/diagnose',{method:'POST',
+        headers:{'Content-Type':'application/json'},body:'{}'});
+      const management=report.management||{};
+      const rows=Array.isArray(report.indexers)?report.indexers:[];
+      $('#i-diagnostics').innerHTML=`<div class="card"><h3>Prowlarr diagnostics</h3>
+        <p class="help">Management API and indexer feeds are checked separately.</p>
+        <p><span class="dot ${management.success?'up':'down'}"></span>
+          <b>Management API</b> — ${management.success?'connected':'failed'}
+          ${management.status?' · HTTP '+esc(management.status):''}
+          ${management.version?' · '+esc(management.version):''}</p>
+        ${management.error?`<p class="help" style="color:var(--warn)">${esc(management.error)}</p>`:''}
+        ${rows.length?`<table><thead><tr><th>Indexer</th><th>Feed</th><th>Details</th>
+          </tr></thead><tbody>${rows.map(item=>`<tr>
+            <td>${esc(item.name||'Indexer')}</td>
+            <td><span class="dot ${item.success?'up':'down'}"></span>
+              ${item.success?'connected':'failed'}${item.status?' · HTTP '+esc(item.status):''}</td>
+            <td style="color:var(--dim)">${esc(item.error||item.recentFailure||'—')}
+              ${item.disabledUntil?`<br>Disabled until ${esc(item.disabledUntil)}`:''}</td>
+            </tr>`).join('')}</tbody></table>`
+          :'<p class="help">No enabled torrent or usenet indexers were found.</p>'}
+        </div>`;
+    }catch(e){
+      $('#i-diagnostics').innerHTML=`<div class="card"><p class="help" style="color:var(--warn)">${esc(e.message||'Diagnostics failed')}</p></div>`;
+    }finally{test.disabled=false;test.textContent='Test indexers';}
+  };
   document.querySelectorAll('[data-iedit]').forEach(b=>b.onclick=()=>
     editItem('indexer', d.items[Number(b.dataset.iedit)]));
 };

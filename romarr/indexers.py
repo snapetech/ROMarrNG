@@ -18,14 +18,33 @@ Two things here are load-bearing and easy to get wrong:
 from __future__ import annotations
 
 import logging
+import re
+from html import unescape
 from dataclasses import dataclass
-from urllib.parse import urlencode
+from urllib.parse import quote, quote_plus, urlencode
 
 import requests
 
 from .selection import CONSOLE_CATEGORIES, PC_GAME_CATEGORIES, Release
 
 log = logging.getLogger(__name__)
+
+_DIAGNOSTIC_SECRET = re.compile(
+    r"(?i)(apikey|api[_-]?key|passkey|password|token|access_token)"
+    r"(?:=|%3d|:)\s*[^&\s\"'<>]+"
+)
+_DIAGNOSTIC_URL = re.compile(r"(?i)\bhttps?://[^\s\"'<>]+")
+
+
+def _safe_diagnostic_detail(value: object, api_key: str = "") -> str:
+    """Keep useful indexer errors without returning credentials or feed URLs."""
+    detail = unescape(str(value or ""))
+    if api_key and len(api_key) >= 4:
+        for secret in (api_key, quote(api_key, safe=""), quote_plus(api_key)):
+            detail = detail.replace(secret, "[redacted]")
+    detail = _DIAGNOSTIC_SECRET.sub(r"\1=[redacted]", detail)
+    detail = _DIAGNOSTIC_URL.sub("[URL]", detail)
+    return re.sub(r"[\r\n\0\x1f]", " ", detail).strip()[:240]
 
 # Newznab category ids sent with every search. Console + PC games only.
 SEARCH_CATEGORIES = (1000, 4050)
@@ -238,6 +257,115 @@ class Prowlarr:
                 "categories": [c for c in cats if c][:4],
             })
         return out
+
+    def diagnose(self) -> dict:
+        """Separate the management API handshake from each proxied feed.
+
+        Prowlarr can answer its management API while one or more configured
+        indexers reject feed searches (including with HTTP 401). This reports
+        those hops independently and never returns API keys or feed URLs.
+        """
+        base = self._config.base_url.rstrip("/")
+        headers = {"X-Api-Key": self._config.api_key}
+        management: dict = {"success": False}
+        try:
+            status = self._session.get(
+                f"{base}/api/v1/system/status", headers=headers, timeout=15)
+            if not status.ok:
+                return {"management": {
+                    "success": False, "status": status.status_code,
+                    "error": f"Prowlarr management API returned HTTP {status.status_code}."},
+                    "indexers": []}
+            system = status.json()
+            if not isinstance(system, dict):
+                return {"management": {
+                    "success": False, "status": status.status_code,
+                    "error": "Prowlarr returned an invalid system status."},
+                    "indexers": []}
+            version = str(system.get("version") or "")[:64]
+            response = self._session.get(
+                f"{base}/api/v1/indexer", headers=headers, timeout=15)
+            if not response.ok:
+                return {"management": {
+                    "success": False, "status": response.status_code,
+                    "version": version,
+                    "error": f"Prowlarr indexer inventory returned HTTP {response.status_code}."},
+                    "indexers": []}
+            rows = response.json()
+            if not isinstance(rows, list):
+                return {"management": {
+                    "success": False, "status": response.status_code,
+                    "version": version,
+                    "error": "Prowlarr returned an invalid indexer inventory."},
+                    "indexers": []}
+            management = {"success": True, "status": response.status_code,
+                          "version": version}
+        except (requests.RequestException, ValueError, TypeError) as exc:
+            management["error"] = (
+                f"Prowlarr management API could not be read ({exc.__class__.__name__}).")
+            return {"management": management, "indexers": []}
+
+        results = []
+        for row in rows:
+            if (not isinstance(row, dict) or not row.get("enable")
+                    or row.get("protocol") not in ("torrent", "usenet")
+                    or not isinstance(row.get("id"), int)
+                    or isinstance(row.get("id"), bool)
+                    or row.get("id") <= 0):
+                continue
+            indexer_id = int(row["id"])
+            name = _safe_diagnostic_detail(
+                row.get("name") or f"Indexer {indexer_id}", self._config.api_key)[:120]
+            feed = f"{base}/{indexer_id}/api"
+            try:
+                response = self._session.get(
+                    feed,
+                    params={"t": "search", "q": "romarrng-indexer-diagnostic",
+                            "limit": 1, "apikey": self._config.api_key},
+                    headers=headers,
+                    timeout=15,
+                )
+                body = response.text[:16384]
+                description = re.search(
+                    r"<error\b[^>]*\bdescription=[\"']([^\"']*)[\"'][^>]*>",
+                    body, re.IGNORECASE)
+                error_text = re.search(
+                    r"<error\b[^>]*>([\s\S]*?)</error>", body, re.IGNORECASE)
+                feed_error = bool(re.search(r"<error\b", body, re.IGNORECASE))
+                detail = _safe_diagnostic_detail(
+                    description.group(1) if description else
+                    re.sub(r"<[^>]*>", " ", error_text.group(1)) if error_text else "",
+                    self._config.api_key)
+                content_type = str(response.headers.get("Content-Type") or "").lower()
+                html_error = "text/html" in content_type or bool(
+                    re.search(r"<\s*html\b", body, re.IGNORECASE))
+                failed = not response.ok or feed_error or html_error
+                fallback = (
+                    "Prowlarr feed returned an HTML page instead of an indexer response."
+                    if html_error else
+                    f"Prowlarr feed returned HTTP {response.status_code}."
+                    if not response.ok else
+                    "Prowlarr feed returned an indexer error response."
+                )
+                results.append({
+                    "id": indexer_id,
+                    "name": name,
+                    "success": not failed,
+                    "status": response.status_code,
+                    "disabledUntil": row.get("disabledTill") or None,
+                    "recentFailure": _safe_diagnostic_detail(
+                        row.get("mostRecentFailure") or row.get("initialFailure") or "",
+                        self._config.api_key),
+                    "error": (detail or fallback) if failed else None,
+                    "layer": "indexer-feed",
+                })
+            except requests.RequestException as exc:
+                results.append({
+                    "id": indexer_id, "name": name, "success": False,
+                    "error": f"Prowlarr feed could not be reached ({exc.__class__.__name__}).",
+                    "layer": "indexer-feed",
+                })
+        return {"management": management, "indexers": results}
 
     def grab(self, guid: str, indexer_id: int) -> bool:
         """Ask Prowlarr to push a release to its configured download client.

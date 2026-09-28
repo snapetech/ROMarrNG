@@ -270,21 +270,46 @@ library root, and an existing ROM is never silently overwritten.
 ## SeerrNG software requests
 
 ROMarrNG exposes an authenticated integration contract for SeerrNG. Configure
-the SeerrNG integration API key in SeerrNG; requests then use ROMarr's normal
+the SeerrNG integration API key in SeerrNG; requests then use ROMarrNG's normal
 platform matching, Prowlarr/direct indexer search, download-client handoff,
-verification, and library import.
-The fork's container is `ghcr.io/snapetech/romarrng:latest`; the upstream
-`ghcr.io/blizzhacker/romarr` image does not include this integration contract.
+verification, and library import. The maintained container is
+`ghcr.io/snapetech/romarrng:latest`.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/v1/integration/ping` | Report the integration API version. |
-| `POST` | `/api/v1/integration/requests` | Idempotently create a request using `externalRequestId`, `game`, and `platform`. |
-| `GET` | `/api/v1/integration/requests/{externalRequestId}` | Read provider status and whether a local file can be delivered. |
+| `GET` | `/api/v1/integration/ping` | Report integration/API versions and available capabilities. |
+| `GET` | `/api/v1/integration/catalog/search-page` | Search the configured IGDB catalog with paging and platform, genre, and release-year filters. |
+| `GET` | `/api/v1/integration/catalog/popular-page` | Browse popular IGDB titles with the same filters. |
+| `GET` | `/api/v1/integration/catalog/platforms` | List IGDB platform IDs and names. |
+| `GET` | `/api/v1/integration/catalog/games/{igdbId}` | Read one game's IGDB catalog details. |
+| `POST` | `/api/v1/integration/requests` | Idempotently create a request using `externalRequestId`, `game`, `platform`, and optional IGDB identity. |
+| `GET` | `/api/v1/integration/requests/{externalRequestId}` | Read provider status, catalog identity, deliverability, and retry/cancel actions. |
 | `POST` | `/api/v1/integration/requests/{externalRequestId}/retry` | Retry failed acquisition. After an interrupted handoff, require `confirmNoExistingDownload: true` after checking the download client's queue and history. |
 | `POST` | `/api/v1/integration/requests/{externalRequestId}/cancel` | Cancel while the request is searching and before a transfer is handed to a download client. After an interrupted handoff, provide `confirmNoExistingDownload: true` only after checking the download client's queue and history. |
 | `GET` | `/api/v1/integration/requests/{externalRequestId}/assets` | List request-scoped files found under a configured local library root. |
 | `GET` | `/api/v1/integration/requests/{externalRequestId}/assets/{assetId}` | Stream a local asset, including HTTP byte ranges. |
+
+The same contract is available under the versioned SeerrNG prefix
+`/api/integration/seerrng/v1`. Its `ping` response advertises contract and
+capability versions, including whether ROMarrNG has IGDB configured. The
+`catalog/platforms`, `catalog/search`, `catalog/search-page`, `catalog/popular`,
+`catalog/popular-page`, and `catalog/games/{igdbId}` routes expose ROMarrNG's
+IGDB catalog with stable
+numeric game and platform IDs. SeerrNG can use this catalog for emulation
+requests while ROMarrNG continues to acquire the ROM; PC game requests remain
+on QuestarrNG. A request carries `{catalogProvider: "igdb", catalogId,
+platformId}` as its `identity`, and its status response reports `retry` and
+`cancel` actions that reflect ROMarrNG's current state.
+
+When IGDB is not configured in ROMarrNG, the handshake reports
+`capabilities.catalog: false` and catalog routes return `503`. Set the IGDB
+provider in ROMarrNG's metadata providers to enable it.
+
+Prowlarr diagnostics are available from the Indexers page and
+`POST /api/v1/indexer/diagnose`. They report the management API separately
+from enabled torrent and usenet feed searches, so a management connection can
+be healthy while one feed returns `401 Unauthorized`. API keys and feed URLs
+are not included in the diagnostic response.
 
 Request IDs are durable and repeated creation is safe. ROMarr can stop a
 request before downloader handoff; after handoff, stop the transfer in ROMarr

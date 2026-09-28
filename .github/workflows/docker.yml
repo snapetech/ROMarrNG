@@ -232,10 +232,10 @@ jobs:
             echo "Pull with: \`docker pull ${IMAGE}:${VERSION}\`."
           } >> release-notes.md
 
-      - name: Create draft release
+      - name: Publish GitHub release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ github.ref_name }}
           name: ROMarrNG ${{ github.ref_name }}
           body_path: release-notes.md
-          draft: true
+          draft: false

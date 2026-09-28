@@ -7,13 +7,16 @@ client, imports files, and reports request status.
 
 All integration endpoints require ROMarrNG authentication. Call them from the
 SeerrNG server using `X-Api-Key` or `Authorization: Bearer`. Keep the ROMarrNG
-API key server-side.
+API key server-side. The canonical SeerrNG prefix is
+`/api/integration/seerrng/v1`. The legacy `/api/v1/integration` routes remain
+available for existing clients.
 
 ## Handshake and platforms
 
-`GET /api/v1/integration/ping` reports the service identifier, application
-version, and request contract version. The current response uses
-`service: "romarr"` for compatibility and `requestContractVersion: 1`.
+`GET /api/v1/integration/ping` reports `service: "ROMarrNG"`, the application
+version, API and request-contract versions, and capabilities. The `catalog`
+capability is true when an IGDB metadata provider with credentials is
+configured. Catalog requests return `503` when it is not configured.
 
 `GET /api/platforms` is the authoritative list of importable systems. Each
 entry includes the stable `slug`, display name, aliases, directory layout,
@@ -25,6 +28,28 @@ which systems are requestable and whether each belongs to Retro or Modern.
 `{ "title": "...", "platform": "..." }` entries and returns whether those
 games already exist in the configured library.
 
+## Game catalog
+
+The catalog endpoints use ROMarrNG's configured IGDB credentials. Catalog game
+IDs are numeric IGDB IDs. Search and popular rows include a stable `id`
+(`igdb-{id}`), `igdbId`, title, summary, cover URL, release date, platform
+names and `{ id, name }` platform options, genres, rating, publishers,
+developers, screenshots, and videos.
+
+| Endpoint | Query | Response |
+| --- | --- | --- |
+| `GET /api/v1/integration/catalog/platforms` | — | IGDB platform `{ id, name }` rows |
+| `GET /api/v1/integration/catalog/search` | `q` required; `limit` 1–50, default 20; optional `platformIds` as comma-separated IDs, `genre`, `releaseYear` | Search result array |
+| `GET /api/v1/integration/catalog/search-page` | Same as search, plus `cursor` (default `0`) | `{ results, nextCursor }`; cursor is the next IGDB offset or `null` |
+| `GET /api/v1/integration/catalog/popular` | `limit` 1–50, default 20; optional `offset` (0–10000), `platformIds`, `genre`, `releaseYear` | Popular result array |
+| `GET /api/v1/integration/catalog/popular-page` | Same as popular | `{ results, nextOffset }`; next offset is a number or `null` |
+| `GET /api/v1/integration/catalog/games/{igdbId}` | Positive numeric IGDB ID | One catalog title; `404` if missing |
+
+Genre filtering is case-insensitive. Release years must be between 1950 and
+2200. Search cursors and popular offsets are bounded to keep catalog requests
+finite. A failed upstream catalog request returns a generic error without
+exposing provider credentials or request details.
+
 ## Submit and read requests
 
 `POST /api/v1/integration/requests` accepts a stable caller-owned request ID:
@@ -33,20 +58,32 @@ games already exist in the configured library.
 {
   "externalRequestId": "seerrng:request:123",
   "game": "Chrono Trigger",
-  "platform": "snes"
+  "platform": "snes",
+  "identity": {
+    "catalogProvider": "igdb",
+    "catalogId": 1234,
+    "platformId": 19
+  }
 }
 ```
 
-The first submission returns `202` while ROMarrNG processes the request. A
-repeat submission with the same ID returns the existing record. The request ID
-must contain 1 to 255 letters, digits, periods, underscores, colons, or hyphens;
-the title is limited to 500 characters and the platform must resolve to a
-supported system. Invalid input returns `400`.
+`identity` is optional. When supplied, `catalogProvider` must be `igdb`,
+`catalogId` must be a positive IGDB ID, and `platformId` is the selected IGDB
+platform ID (or `0` when the target has no catalog platform ID). The request
+ID must contain 1 to 255 letters, digits, periods, underscores, colons, or
+hyphens; the title is limited to 500 characters and the platform must resolve
+to a supported ROMarrNG system. Invalid input returns `400`.
 
-`GET /api/v1/integration/requests/{externalRequestId}` returns the current
-status, title, platform, whether imported files can be delivered, and a safe
-error when the request failed. Status values include `searching`,
-`downloading`, `available`, `failed`, and `cancelled`.
+The first submission returns `202` while ROMarrNG processes the request. A
+repeat submission with the same ID returns the existing record only when its
+normalized title, ROMarrNG platform, and catalog identity match. Reusing an ID
+for another game or platform returns `409`.
+
+`GET /api/v1/integration/requests/{externalRequestId}` returns status, title,
+platform, catalog identity when present, whether imported files can be
+delivered, a safe failure message, and available `actions.retry` and
+`actions.cancel` flags. Status values include `searching`, `downloading`,
+`available`, `failed`, and `cancelled`.
 
 ## Retry and cancel
 
@@ -80,3 +117,13 @@ library root, and supports byte-range requests for resumable downloads.
 SeerrNG should authorize access to its own request before calling either asset
 endpoint, then proxy the stream without buffering the entire file. ROMarrNG
 credentials and local paths stay server-side.
+
+## Prowlarr diagnostics
+
+`POST /api/v1/indexer/diagnose` separately checks Prowlarr's management API
+and runs a bounded one-result search through each enabled torrent or usenet
+feed. Results include the feed HTTP status, disabled-until time, and recent
+failure detail when Prowlarr reports one. API keys and feed URLs are removed
+from diagnostics. The Indexers page exposes the same check with per-indexer
+results, which helps distinguish an invalid Prowlarr API key from an indexer
+feed returning `401 Unauthorized`.

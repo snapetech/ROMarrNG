@@ -213,7 +213,18 @@ IGDB_POPULARITY_PLAYED = 4
 #: Everything a browse row needs, written once so the three shelves and the
 #: calendar cannot drift into returning different shapes.
 IGDB_SHELF_FIELDS = ("fields id,name,summary,first_release_date,total_rating,"
-                     "total_rating_count,hypes,cover.url,platforms.name;")
+                     "total_rating_count,hypes,cover.url,platforms.id,"
+                     "platforms.name,genres.name;")
+IGDB_CATALOG_FIELDS = (
+    "fields id,name,summary,first_release_date,total_rating,cover.url,"
+    "platforms.id,platforms.name,genres.name;"
+)
+IGDB_CATALOG_DETAIL_FIELDS = (
+    "fields id,name,summary,first_release_date,total_rating,cover.url,"
+    "platforms.id,platforms.name,genres.name,involved_companies.company.name,"
+    "involved_companies.developer,involved_companies.publisher,"
+    "screenshots.url,videos.name,videos.video_id;"
+)
 
 #: Main games only. Without it a dated shelf is half DLC: "Helldivers 2: Face
 #: the Unknown" next Tuesday is a warbond, not a release. Note the field --
@@ -284,7 +295,7 @@ def _igdb_bearer(client_id: str, secret: str, *, refresh: bool = False) -> str:
     return token
 
 
-def igdb_query(cfg: dict, endpoint: str, body: str) -> list[dict]:
+def igdb_query(cfg: dict, endpoint: str, body: str, *, strict: bool = False) -> list[dict]:
     """One Apicalypse query against IGDB, with the token handled.
 
     The body is IGDB's own query language, not JSON. Posting JSON here earns
@@ -294,6 +305,8 @@ def igdb_query(cfg: dict, endpoint: str, body: str) -> list[dict]:
     client_id = str(cfg.get("client_id") or "")
     secret = str(cfg.get("token") or "")
     if not (client_id and secret):
+        if strict:
+            raise RuntimeError("IGDB credentials are missing")
         return []
     try:
         bearer = _igdb_bearer(client_id, secret)
@@ -306,6 +319,8 @@ def igdb_query(cfg: dict, endpoint: str, body: str) -> list[dict]:
                   "as a bearer token", exc.__class__.__name__)
         bearer = secret
     if not bearer:
+        if strict:
+            raise RuntimeError("IGDB authentication failed")
         return []
     for attempt in (1, 2):
         _igdb_wait()
@@ -318,7 +333,11 @@ def igdb_query(cfg: dict, endpoint: str, body: str) -> list[dict]:
         try:
             with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
                 rows = json.loads(response.read().decode("utf-8"))
-            return rows if isinstance(rows, list) else []
+            if isinstance(rows, list):
+                return rows
+            if strict:
+                raise RuntimeError("IGDB returned an invalid catalog response")
+            return []
         except urllib.error.HTTPError as exc:
             # Sixty days outlives most processes but not all of them, and
             # Twitch can revoke early. One forced refresh, then it is a real
@@ -327,12 +346,18 @@ def igdb_query(cfg: dict, endpoint: str, body: str) -> list[dict]:
                 try:
                     bearer = _igdb_bearer(client_id, secret, refresh=True)
                 except Exception:
+                    if strict:
+                        raise RuntimeError("IGDB authentication failed") from None
                     return []
                 continue
             log.warning("IGDB %s rejected: HTTP %s", endpoint, exc.code)
+            if strict:
+                raise RuntimeError(f"IGDB request failed with HTTP {exc.code}") from None
             return []
         except Exception as exc:
             log.warning("IGDB %s failed: %s", endpoint, exc)
+            if strict:
+                raise RuntimeError("IGDB request failed") from None
             return []
     return []
 
@@ -366,6 +391,7 @@ def _igdb_shelf_row(row: dict) -> dict:
     # is not half "84" and half "4.6" with the same symbol in front of both.
     score = float(row.get("total_rating") or row.get("rating") or 0.0)
     return {
+        "igdb_id": int(row.get("id") or 0),
         "title": str(row.get("name") or ""),
         "summary": str(row.get("summary") or ""),
         "released": released,
@@ -373,8 +399,152 @@ def _igdb_shelf_row(row: dict) -> dict:
         "cover_url": igdb_cover((row.get("cover") or {}).get("url") or ""),
         "platforms": [str(p.get("name") or "")
                       for p in (row.get("platforms") or []) if p.get("name")],
+        "platform_options": [
+            {"id": int(p["id"]), "name": str(p.get("name") or "")}
+            for p in (row.get("platforms") or [])
+            if p.get("id") and p.get("name")
+        ],
+        "genres": [str(g.get("name") or "")
+                   for g in (row.get("genres") or []) if g.get("name")],
         "source": "IGDB",
     }
+
+
+def igdb_catalog_config(providers: list[dict]) -> dict | None:
+    """Return the configured IGDB credentials for SeerrNG catalog calls."""
+    return next((cfg for cfg in providers
+                 if str(cfg.get("type") or "").lower() == "igdb"
+                 and cfg.get("client_id") and cfg.get("token")), None)
+
+
+def igdb_catalog_row(row: dict) -> dict:
+    """Map one IGDB result to the shared SeerrNG game identity shape."""
+    data = _igdb_shelf_row(row)
+    game_id = data["igdb_id"]
+    companies = row.get("involved_companies") or []
+    return {
+        "id": f"igdb-{game_id}",
+        "igdbId": game_id,
+        "title": data["title"],
+        "summary": data["summary"],
+        "coverUrl": igdb_cover((row.get("cover") or {}).get("url") or ""),
+        "releaseDate": data["released"],
+        "platforms": data["platforms"],
+        "platformOptions": data["platform_options"],
+        "genres": data["genres"],
+        "rating": min(100.0, max(0.0, float(row.get("total_rating") or 0.0))),
+        "publishers": [str(item.get("company", {}).get("name") or "")
+                       for item in companies
+                       if item.get("publisher") and item.get("company", {}).get("name")],
+        "developers": [str(item.get("company", {}).get("name") or "")
+                       for item in companies
+                       if item.get("developer") and item.get("company", {}).get("name")],
+        "screenshots": [igdb_cover(item.get("url") or "", "t_screenshot_big")
+                        for item in (row.get("screenshots") or [])
+                        if item.get("url")],
+        "videos": [{"name": str(item.get("name") or "")[:120],
+                    "videoId": str(item.get("video_id") or "")}
+                   for item in (row.get("videos") or [])
+                   if item.get("video_id")],
+    }
+
+
+def igdb_catalog_platforms(cfg: dict) -> list[dict]:
+    rows = igdb_query(cfg, "platforms",
+                      "fields id,name; sort name asc; limit 500;", strict=True)
+    return [{"id": int(row["id"]), "name": str(row.get("name") or "")}
+            for row in rows if row.get("id") and row.get("name")]
+
+
+def igdb_catalog_search(cfg: dict, query: str, limit: int, offset: int,
+                        platform_ids: list[int] | None = None,
+                        genre: str = "", release_year: int | None = None
+                        ) -> tuple[list[dict], int | None]:
+    escaped = str(query).replace("\\", "\\\\").replace('"', '\\"')
+    where = [IGDB_MAIN_GAMES]
+    if platform_ids:
+        where.append("platforms = (" + ",".join(str(i) for i in platform_ids) + ")")
+    if release_year:
+        start = int(datetime.datetime(release_year, 1, 1, tzinfo=datetime.timezone.utc).timestamp())
+        end = int(datetime.datetime(release_year + 1, 1, 1, tzinfo=datetime.timezone.utc).timestamp()) - 1
+        where.extend((f"first_release_date >= {start}", f"first_release_date <= {end}"))
+    rows = igdb_query(
+        cfg, "games",
+        f'search "{escaped}"; {IGDB_CATALOG_FIELDS} where '
+        f'{" & ".join(where)}; sort name asc; limit 500; '
+        f'offset {max(0, min(int(offset), 10000))};',
+        strict=True,
+    )
+    selected = []
+    consumed = 0
+    target = _igdb_limit(limit)
+    for row in rows:
+        consumed += 1
+        game = igdb_catalog_row(row)
+        if genre and not any(value.casefold() == genre.casefold() for value in game["genres"]):
+            continue
+        selected.append(game)
+        if len(selected) >= target:
+            break
+    next_offset = None
+    if consumed < len(rows) or len(rows) >= 500:
+        next_offset = min(10000, max(0, int(offset)) + consumed)
+    return selected, next_offset
+
+
+def igdb_catalog_popular_page(cfg: dict, offset: int,
+                              platform_ids: list[int] | None = None,
+                              limit: int = 20, genre: str = "",
+                              release_year: int | None = None
+                              ) -> tuple[list[dict], int | None]:
+    """One bounded raw popularity page plus its consumed IGDB row count."""
+    primitives = igdb_query(
+        cfg, "popularity_primitives",
+        f"fields game_id,value; where popularity_type = "
+        f"{IGDB_POPULARITY_PLAYED}; sort value desc; limit 500; "
+        f"offset {max(0, min(int(offset), 10000))};", strict=True,
+    )
+    ranked = [int(row["game_id"]) for row in primitives if row.get("game_id")]
+    if not ranked:
+        return [], None
+    rows = igdb_query(
+        cfg, "games",
+        f"{IGDB_CATALOG_FIELDS} where id = ({','.join(str(i) for i in ranked)}) "
+        f"& {IGDB_MAIN_GAMES}; limit {len(ranked)};", strict=True,
+    )
+    found = {int(row["id"]): row for row in rows if row.get("id")}
+    allowed = set(platform_ids or [])
+    output = []
+    consumed = 0
+    target = _igdb_limit(limit)
+    for game_id in ranked:
+        consumed += 1
+        row = found.get(game_id)
+        if not row:
+            continue
+        game = igdb_catalog_row(row)
+        if allowed and not any(option["id"] in allowed for option in game["platformOptions"]):
+            continue
+        if genre and not any(value.casefold() == genre.casefold() for value in game["genres"]):
+            continue
+        if release_year and game["releaseDate"][:4] != str(release_year):
+            continue
+        output.append(game)
+        if len(output) >= target:
+            break
+    next_offset = None
+    if consumed < len(primitives) or len(primitives) >= 500:
+        next_offset = min(10000, max(0, int(offset)) + consumed)
+    return output, next_offset
+
+
+def igdb_catalog_game(cfg: dict, igdb_id: int) -> dict | None:
+    rows = igdb_query(
+        cfg, "games",
+        f"{IGDB_CATALOG_DETAIL_FIELDS} where id = {int(igdb_id)} "
+        f"& {IGDB_MAIN_GAMES}; limit 1;", strict=True,
+    )
+    return igdb_catalog_row(rows[0]) if rows else None
 
 
 def _igdb(cfg: dict, term: str) -> GameInfo:
