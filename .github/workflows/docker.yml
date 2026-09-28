@@ -65,6 +65,9 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.image.outputs.name }}
+          # Semver otherwise synthesizes latest too, allowing an older tag
+          # rebuild to replace the explicitly selected default-branch image.
+          flavor: latest=false
           # These are passed to the build as `labels:` below, which means they
           # are applied *after* the Dockerfile's own LABEL and win. Left to its
           # defaults this action titles the image `romarr` from the repository
