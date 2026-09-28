@@ -710,20 +710,53 @@ class FolderLibrary:
         return known | set(self.ARCHIVES)
 
     def _walk(self, limit: int):
-        """ROM-looking files under the root, newest-shallowest first."""
+        """Bounded traversal; a complete folder dump is one library entry."""
+        from pathlib import Path
+        from .platforms import resolve
         if not self.configured:
             return
         exts = self._extensions()
         seen = 0
-        for path in sorted(self._root.rglob("*")):
+        visited = 0
+        for current, dirs, files in os.walk(self._root, followlinks=False):
             if seen >= limit:
                 return
-            if not path.is_file():
+            visited += 1
+            if visited > self.MAX_SCAN:
+                return
+            directory = Path(current)
+            dirs[:] = sorted(name for name in dirs
+                             if not (directory / name).is_symlink()
+                             and not name.startswith(".romarr-import-"))
+            relative = directory.relative_to(self._root)
+            platform = resolve(relative.parts[0]) if relative.parts else None
+            if (platform and platform.directory_layout and len(relative.parts) >= 2
+                    and all(self._layout_file(directory, name)
+                            for name in platform.directory_layout)):
+                dirs[:] = []
+                seen += 1
+                yield directory
                 continue
-            if path.suffix.lower() not in exts:
-                continue
-            seen += 1
-            yield path
+            allowed = set(platform.extensions) | set(self.ARCHIVES) if platform else exts
+            for name in sorted(files):
+                if seen >= limit:
+                    return
+                path = directory / name
+                if path.is_symlink() or not path.is_file() or path.suffix.lower() not in allowed:
+                    continue
+                seen += 1
+                yield path
+
+    @staticmethod
+    def _layout_file(directory, name):
+        path = directory
+        for part in name.split("/"):
+            path = next((child for child in path.iterdir()
+                         if child.name.casefold() == part.casefold()
+                         and not child.is_symlink()), None) if path.is_dir() else None
+            if path is None:
+                return False
+        return path.is_file()
 
     def reachable(self) -> bool:
         """Whether the directory is there. Cheap, because a page waits on it."""
@@ -755,8 +788,9 @@ class FolderLibrary:
                     continue
                 out.append(Game(
                     id=str(path),
-                    name=path.stem,
-                    platform=path.parent.name if path.parent != self._root else "",
+                    name=path.name if path.is_dir() else path.stem,
+                    platform=path.relative_to(self._root).parts[0]
+                    if path.parent != self._root else "",
                     # Free here, where every other backend has to be asked
                     # for it: the walk is over real files.
                     extension=path.suffix.lower(),

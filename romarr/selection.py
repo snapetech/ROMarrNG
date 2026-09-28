@@ -42,7 +42,9 @@ FOREIGN_PLATFORM_MARKERS = {
     # are needed for the same reason "playstation 2" is above: markers are
     # tried longest-first, and without these an Xbox request treats an "Xbox
     # 360" title as naming itself and imports a disc no Xbox can read.
-    "xbox", "xbox 360", "xbox one", "x360", "xbla",
+    "xbox", "xbox 360", "xbox one", "xboxone", "xb1", "x360", "xbla",
+    "xbox series x/s", "xbox series x|s", "xbox series x", "xbox series s",
+    "xbox series", "xboxseries", "series-x-s", "psvita", "ps vita",
     "gamecube", "wii", "wiiu", "wii u", "3ds", "nds", "ds",
     "android", "apk", "ios",
     "pc", "windows", "steam", "gog", "repack",
@@ -393,6 +395,10 @@ def judge(release: Release, wanted: str,
     # platform's aliases are removed from the check first, so asking for a Wii
     # game does not disqualify a title that says "Wii".
     if platform is not None:
+        if platform.requires_platform_label and not any(
+                _mentions(lowered, label.lower()) for label in
+                (platform.slug, platform.name, *platform.aliases)):
+            return Judgement(-300, verdict="missing explicit console platform")
         own = {platform.slug.lower(), platform.name.lower(), *platform.aliases,
                *platform.native_markers}
         own_words = {w for entry in own for w in entry.split()}
@@ -574,6 +580,8 @@ class RomSet:
 
     primary: str
     members: tuple[str, ...]
+    root: str = ""
+    preserve_paths: bool = False
 
     @property
     def is_multi_file(self) -> bool:
@@ -623,7 +631,27 @@ def _digital_set(filenames: list[str]) -> RomSet | None:
     exes = [f for f in filenames if f.lower().endswith(".exe")]
     primary = next((f for f in exes if "setup" in f.lower()),
                    exes[0] if exes else filenames[0])
-    return RomSet(primary, tuple(filenames))
+    return RomSet(primary, tuple(filenames), preserve_paths=True)
+
+
+def _directory_sets(filenames: list[str], platform: Platform) -> list[RomSet]:
+    """Select complete folder dumps without merging neighboring titles."""
+    if not platform.directory_layout:
+        return []
+    entrypoint, metadata = platform.directory_layout
+    normalized = {name.replace("\\", "/").lower(): name for name in filenames}
+    sets = []
+    for path, original in normalized.items():
+        entry = entrypoint.lower()
+        if path != entry and not path.endswith("/" + entry):
+            continue
+        root = original.replace("\\", "/")[:-len(entrypoint)]
+        if (root + metadata).lower() not in normalized:
+            continue
+        members = tuple(name for name in filenames
+                        if name.replace("\\", "/").lower().startswith(root.lower()))
+        sets.append(RomSet(original, members, root, True))
+    return sets
 
 
 def pick_rom_set(filenames: list[str], platform: Platform, *,
@@ -645,6 +673,10 @@ def pick_rom_set(filenames: list[str], platform: Platform, *,
 
     if platform.media == "digital":
         return _digital_set(filenames)
+
+    directories = _directory_sets(filenames, platform)
+    if directories:
+        return directories[0]
 
     playable = [f for f in filenames if not _is_extra(f)]
 
@@ -685,6 +717,10 @@ def pick_all_rom_sets(filenames: list[str], platform: Platform, *,
     if platform.media == "digital":
         one = _digital_set(filenames)
         return [one] if one else []
+
+    directories = _directory_sets(filenames, platform)
+    if directories:
+        return directories
 
     playable = [f for f in filenames if not _is_extra(f)]
 

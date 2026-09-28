@@ -29,11 +29,12 @@ from dataclasses import dataclass, field
 CARTRIDGE = "cartridge"
 DISC = "disc"
 COMPUTER = "computer"
+PACKAGE = "package"
 
 
 @dataclass(frozen=True)
 class Platform:
-    """A console RomM can hold and an emulator can run."""
+    """An acquisition and library format; playback is a separate capability."""
 
     slug: str                      # RomM's fs_slug -- the library folder name
     name: str                      # human label
@@ -61,6 +62,11 @@ class Platform:
     # same rule in `archives.py` under the same reasoning -- extraction is
     # opt-in per platform, never "expand anything compressed".
     archive_is_the_rom: bool = False
+    # Folder dumps need both an executable and generation-specific metadata.
+    # Keep their complete tree; picking only eboot.bin loses the game assets.
+    directory_layout: tuple[str, str] = ()
+    # Shared package extensions cannot identify the console on their own.
+    requires_platform_label: bool = False
 
     @property
     def is_disc(self) -> bool:
@@ -204,7 +210,23 @@ PLATFORMS: tuple[Platform, ...] = (
     Platform("ps3", "Sony PlayStation 3",
              (".iso", ".pkg", ".zip", ".7z"),
              ("playstation 3", "ps3"),
-             max_size=64 * GB, media=DISC),
+             max_size=64 * GB, media=DISC,
+             directory_layout=("PS3_GAME/USRDIR/EBOOT.BIN", "PS3_GAME/PARAM.SFO")),
+    Platform("ps4", "PlayStation 4", (".pkg",),
+             ("sony playstation 4", "playstation 4", "ps4"),
+             max_size=512 * GB, media=PACKAGE,
+             directory_layout=("eboot.bin", "sce_sys/param.sfo"),
+             requires_platform_label=True),
+    Platform("ps5", "PlayStation 5", (".pkg",),
+             ("sony playstation 5", "playstation 5", "ps5"),
+             max_size=512 * GB, media=PACKAGE,
+             directory_layout=("eboot.bin", "sce_sys/param.json"),
+             requires_platform_label=True),
+    Platform("psvita", "PlayStation Vita", (".vpk",),
+             ("sony playstation vita", "playstation vita", "ps vita", "vita"),
+             max_size=16 * GB, media=PACKAGE,
+             directory_layout=("eboot.bin", "sce_sys/param.sfo"),
+             requires_platform_label=True),
     Platform("psp", "Sony PlayStation Portable",
              (".cso", ".iso", ".chd", ".pbp"),
              ("playstation portable", "psp"),
@@ -274,6 +296,15 @@ PLATFORMS: tuple[Platform, ...] = (
               "xbla", "xbox live arcade", "games on demand"),
              max_size=12 * GB, media=DISC,
              native_markers=("x360", "xbla")),
+    Platform("xboxone", "Xbox One", (".xvc",),
+             ("microsoft xbox one", "xbox one", "xboxone", "xb1"),
+             max_size=512 * GB, media=PACKAGE,
+             requires_platform_label=True),
+    Platform("series-x-s", "Xbox Series X/S", (".xvc",),
+             ("microsoft xbox series x/s", "xbox series x/s", "xbox series x|s",
+              "xbox series x", "xbox series s", "xbox series", "xboxseries"),
+             max_size=512 * GB, media=PACKAGE,
+             requires_platform_label=True),
     Platform("3do", "3DO Interactive Multiplayer",
              (".chd", ".cue", ".bin", ".iso"),
              ("3do interactive", "panasonic 3do"), max_size=2 * GB, media=DISC),

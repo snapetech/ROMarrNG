@@ -8,6 +8,8 @@ and unwired is exactly as open as no gate at all.
 from __future__ import annotations
 
 import json
+import io
+import tarfile
 import logging
 import threading
 import urllib.error
@@ -18,6 +20,7 @@ import pytest
 
 from romarr.app import ROMarr, make_handler
 from romarr.libraries import Game
+from romarr.store import SeerrRequest
 
 
 @pytest.fixture
@@ -481,3 +484,36 @@ def test_ordinary_browsing_is_not_rate_limited(server):
     base, _ = server
     codes = [get(base + "/api/v1/game", key="testkey")[0] for _ in range(20)]
     assert set(codes) == {200}
+
+
+def test_complete_game_bundle_is_authenticated_and_request_scoped(server, tmp_path, monkeypatch):
+    base, service = server
+    root = tmp_path / "library"
+    game = root / "ps5" / "Test Game"
+    for number in range(120):
+        path = game / "assets" / f"{number}.bin"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"game")
+    monkeypatch.setattr(service, "library_for", lambda _: ({"path": str(root)}, None))
+    monkeypatch.setattr(service, "library_view", lambda **_: {"items": [
+        {"id": str(game), "name": "Test Game", "platform": "ps5"},
+    ]})
+    service.store.put_seerr_request(SeerrRequest("seerr-1", "Test Game", "ps5"))
+    service.store.put_seerr_request(SeerrRequest("seerr-2", "Other Game", "ps5"))
+    route = base + "/api/v1/integration/requests/seerr-1/assets"
+    assert get(route)[0] == 401
+    status, body, _ = get(route, key="testkey")
+    assert status == 200
+    result = json.loads(body)
+    assert result["bundleSupported"] is True
+    [asset] = result["assets"]
+    download = route + "/" + asset["id"]
+    assert get(download)[0] == 401
+    status, body, headers = get(download, key="testkey")
+    assert status == 200
+    assert headers["Content-Type"] == "application/x-tar"
+    assert len(body) == asset["size"] == int(headers["Content-Length"])
+    with tarfile.open(fileobj=io.BytesIO(body)) as archive:
+        assert len(archive.getnames()) == 120
+        assert archive.extractfile("assets/119.bin").read() == b"game"
+    assert get(download.replace("seerr-1", "seerr-2"), key="testkey")[0] == 404

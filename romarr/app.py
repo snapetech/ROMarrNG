@@ -38,6 +38,7 @@ import mimetypes
 import os
 import pathlib
 import re
+import tarfile
 import threading
 import unicodedata
 from dataclasses import asdict, dataclass, field, replace
@@ -64,6 +65,7 @@ from .downloaders import (
 from .indexers import INDEXER_TYPES, build_indexer, redact_indexer
 from .indexers import Prowlarr, ProwlarrConfig
 from .library import import_rom, map_remote_path
+from .game_assets import directory_asset, stream_directory
 from .collections import is_translation
 from .auth import DISABLED as AUTH_DISABLED
 from .auth import MIN_PASSWORD, SESSION_COOKIE, Auth, new_api_key, parse_cookies
@@ -163,14 +165,31 @@ def _seerr_title_key(value: str) -> str:
 
 def _seerr_library_lookup(service, titles: list[dict]) -> dict:
     games, _, _ = service._library_cache
-    if games is None:
-        return {"ready": False, "partial": False, "matches": []}
     requested = {
         (item["platform"], _seerr_title_key(item["title"])):
         {"title": item["title"], "platform": item["platform"]}
         for item in titles
     }
     matches = {}
+    # Preserve catalog identity even when an imported package/folder is named
+    # by a console title ID rather than the title the user requested.
+    for item in service.queue:
+        key = (item.platform, _seerr_title_key(item.game))
+        if item.state != "imported" or not item.imported_paths or key not in requested:
+            continue
+        target = service.library_for(item.platform) or service.default_library()
+        if target is None:
+            continue
+        try:
+            root = service.library_root(target[0]).resolve(strict=True)
+            if all(Path(path).resolve(strict=True).is_relative_to(root)
+                   for path in item.imported_paths):
+                matches[key] = requested[key]
+        except (OSError, ValueError):
+            continue
+    if games is None:
+        return {"ready": bool(matches), "partial": bool(matches),
+                "matches": list(matches.values())}
     for game in games:
         platform = resolve(game.platform)
         if platform is None:
@@ -219,8 +238,10 @@ def _seerr_local_assets(service, request: SeerrRequest) -> list[dict]:
         return []
 
     assets: list[dict] = []
-    scanned = 0
-    for row in _seerr_library_matches(service, request):
+    imported_rows = [{"id": path} for item in service.queue
+                     if item.external_request_id == request.external_request_id
+                     and item.state == "imported" for path in item.imported_paths]
+    for row in imported_rows or _seerr_library_matches(service, request):
         source = Path(str(row.get("id") or ""))
         if not source.is_absolute():
             continue
@@ -233,19 +254,13 @@ def _seerr_local_assets(service, request: SeerrRequest) -> list[dict]:
         if source.is_file():
             paths = [source]
         elif source.is_dir():
-            for current, dirs, files in os.walk(source, followlinks=False):
-                dirs[:] = [name for name in dirs
-                           if not (Path(current) / name).is_symlink()]
-                for name in files:
-                    scanned += 1
-                    if scanned > 10_000:
-                        break
-                    paths.append(Path(current) / name)
-                    if len(paths) >= 100:
-                        break
-                if scanned > 10_000 or len(paths) >= 100:
-                    break
-
+            bundle = directory_asset(source, root)
+            if bundle is not None:
+                assets.append(bundle)
+            if len(assets) >= 100:
+                return assets
+            # A tree is one complete download, never the first hundred files.
+            continue
         for candidate in paths:
             try:
                 real = candidate.resolve(strict=True)
@@ -2838,6 +2853,9 @@ class ROMarr:
             out.append({
                 "slug": platform.slug,
                 "name": platform.name,
+                "aliases": list(platform.aliases),
+                "directory_layout": list(platform.directory_layout),
+                "requires_platform_label": platform.requires_platform_label,
                 "media": platform.media,
                 "extensions": list(platform.extensions),
                 "max_size_mb": platform.max_size // (1024 * 1024),
@@ -4583,6 +4601,9 @@ class ROMarr:
                 # Marked so the scheduled sweep never re-attempts it; the
                 # Tasks page button clears failure marks to retry.
                 queue_item.state = "imported" if any_ok else "import-failed"
+                queue_item.imported_paths = [str(outcome.destination.resolve())
+                                             for outcome in outcomes
+                                             if outcome.ok and outcome.destination]
             if any_ok:
                 if self.store.settings.get("rescan_after_import", True):
                     target_lib.rescan(platform.slug)
@@ -4848,16 +4869,15 @@ def make_handler(service: ROMarr):
                 request = service.store.get_seerr_request(external_id)
                 if request is None:
                     return self._json(404, {"error": "request not found"})
-                view = _seerr_request_view(service, request)
                 if len(parts) == 1:
-                    return self._json(200, view)
+                    return self._json(200, _seerr_request_view(service, request))
                 if len(parts) == 2 and parts[1] == "assets":
                     assets = _seerr_local_assets(service, request)
                     return self._json(200, {
                         "assets": [{"id": item["id"], "name": item["name"],
                                     "size": item["size"], "url": ""}
                                    for item in assets],
-                        "bundleSupported": False,
+                        "bundleSupported": any("members" in item for item in assets),
                     })
                 if len(parts) == 3 and parts[1] == "assets":
                     asset_id = unquote(parts[2])
@@ -4868,6 +4888,18 @@ def make_handler(service: ROMarr):
                     )
                     if asset is None:
                         return self._json(404, {"error": "asset not found"})
+                    if "members" in asset:
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/x-tar")
+                        self.send_header("Content-Length", str(asset["size"]))
+                        self.send_header("Content-Disposition",
+                                         "attachment; filename*=UTF-8''" + quote(asset["name"]))
+                        self.end_headers()
+                        try:
+                            stream_directory(asset, self.wfile)
+                        except (OSError, ValueError, tarfile.TarError):
+                            self.close_connection = True
+                        return None
                     try:
                         fh = open(asset["path"], "rb")
                         size = os.fstat(fh.fileno()).st_size

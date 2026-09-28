@@ -520,8 +520,40 @@ LIBRARY_PATH=/mnt/roms
 
 ### Supported platforms
 
-58 platforms. The bar for inclusion is a real play route — a core in RomM's
-base EmulatorJS map, or one installed on a stream server.
+The authenticated `/api/platforms` directory is the current platform list,
+including aliases used by SeerrNG catalog matching. A supported acquisition
+and library format does not establish emulator compatibility. The endpoint
+reports playback routes separately; recent consoles are download-only unless
+a configured player reports support.
+
+**Recent consoles** — PlayStation 4 (`ps4`) and PlayStation 5 (`ps5`) accept
+`.pkg` files or complete game folder dumps. PlayStation Vita (`psvita`) accepts
+`.vpk` files or complete dumps. Xbox One (`xboxone`) and Xbox Series X/S
+(`series-x-s`) accept `.xvc` console packages; PC `.msixvc` installers are not
+console packages. Recent-console release names must explicitly identify the
+requested system. Indexers and download clients still determine whether a
+matching release can be acquired. Packages are stored without decryption or
+installation, and no game is declared runnable based on its filename.
+
+Folder dumps require their executable and platform metadata: PS4/Vita use
+`eboot.bin` with `sce_sys/param.sfo`, PS5 uses `eboot.bin` with
+`sce_sys/param.json`, and PS3 uses `PS3_GAME/USRDIR/EBOOT.BIN` with
+`PS3_GAME/PARAM.SFO`. Imports retain the full tree, including assets and icons,
+and publish it only after copying succeeds. Folder libraries recognize each
+complete dump as one game. SeerrNG request delivery offers a complete TAR
+stream rather than a partial file list; it uses bounded buffers and no
+temporary archive. TAR streams do not support resuming; individual package
+files retain byte ranges. Trees beyond 10,000 files or the traversal bounds
+are not offered as downloadable bundles. Checksum verification remains
+unknown unless a configured DAT identifies the bytes.
+
+For SeerrNG, update ROMarrNG and assign these new systems to **Modern** in
+Software Acquisition settings. Existing saved groups are retained.
+
+Format references: [RomM platform folders](https://docs.romm.app/4.5.0/Platforms-and-Players/Supported-Platforms/),
+[shadPS4 folder dumps](https://github.com/shadps4-emu/shadPS4/wiki/I.-Quick-start-%5BUsers%5D),
+[PS5 package and folder tools](https://github.com/SvenGDK/LibProsperoPKG), and
+[Microsoft console and PC package formats](https://learn.microsoft.com/en-us/gaming/game-publishing/tutorial-xbox-managed/how-to-create-a-package).
 
 **Cartridge** — NES, Famicom, Famicom Disk System, SNES, Super Famicom, Game
 Boy / Color / Advance, N64, Genesis / Mega Drive, Sega 32X, Master System,
@@ -529,8 +561,8 @@ Game Gear, Atari 2600 / 5200 / 7800, Lynx, Jaguar, TurboGrafx-16, SuperGrafx,
 ColecoVision, Intellivision, Vectrex, WonderSwan / Color, Neo Geo Pocket /
 Color, Neo Geo AES / MVS, Arcade, Virtual Boy, Nintendo DS, Nintendo 3DS.
 
-**Disc** — PlayStation, PlayStation 2, PSP, Saturn, Sega CD / Mega-CD,
-Dreamcast, GameCube, Wii, 3DO, Philips CD-i, PC-FX, TurboGrafx-CD / PC Engine
+**Disc** — PlayStation, PlayStation 2, PlayStation 3, PSP, Saturn, Sega CD / Mega-CD,
+Dreamcast, GameCube, Wii, Wii U, Xbox, Xbox 360, 3DO, Philips CD-i, PC-FX, TurboGrafx-CD / PC Engine
 CD, Amiga CD32, Neo Geo CD, Atari Jaguar CD.
 
 **Home computer** — Commodore 64 / 128 / VIC-20, Amiga, Amstrad CPC, ZX

@@ -17,12 +17,14 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
+import threading
 import zipfile
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
-from .dat import BAD_DUMP, UNKNOWN, VERIFIED, Match, hash_bytes
+from .dat import BAD_DUMP, UNKNOWN, VERIFIED, Match, hash_bytes, hash_file, hash_stream
 from .platforms import Platform
 from .selection import pick_all_rom_sets, pick_rom_set
 
@@ -108,7 +110,10 @@ def is_safe_name(name: str, root: Path) -> bool:
     zip-slip protection at all -- and the format an attacker chooses is the one
     with the gap.
     """
-    if not name or name.endswith(("/", "\\")):
+    normalized = name.replace("\\", "/")
+    if (not normalized or normalized.endswith("/") or "\x00" in normalized
+            or normalized.startswith("/") or ":" in normalized
+            or ".." in normalized.split("/")):
         return False
     root_resolved = root.resolve()
     return (root_resolved / name).resolve().is_relative_to(root_resolved)
@@ -151,6 +156,15 @@ class _Source:
     def copy(self, name: str, destination: Path) -> None:
         raise NotImplementedError
 
+    def hashes(self, name: str) -> dict:
+        return hash_bytes(self.read(name), suffix=Path(name).suffix)
+
+    def copy_set(self, members, stage):
+        for member, name in members:
+            target = stage / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            self.copy(member, target)
+
 
 class _ZipSource(_Source):
     def __init__(self, path: Path):
@@ -168,6 +182,21 @@ class _ZipSource(_Source):
         with zipfile.ZipFile(self.path) as archive, \
                 archive.open(name) as src, open(destination, "wb") as dst:
             shutil.copyfileobj(src, dst)
+
+    def hashes(self, name):
+        with zipfile.ZipFile(self.path) as archive, archive.open(name) as handle:
+            return hash_stream(handle, suffix=Path(name).suffix,
+                               size=archive.getinfo(name).file_size)
+
+    def copy_set(self, members, stage):
+        # One central-directory read for the whole game, rather than reopening
+        # a potentially large ZIP once for every asset.
+        with zipfile.ZipFile(self.path) as archive:
+            for member, name in members:
+                target = stage / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(member) as source, open(target, "wb") as output:
+                    shutil.copyfileobj(source, output)
 
 
 class _BsdtarSource(_Source):
@@ -200,6 +229,53 @@ class _BsdtarSource(_Source):
             subprocess.run([self.tool, "-xOf", str(self.path), name],
                            stdout=dst, check=True, timeout=600)
 
+    def hashes(self, name):
+        # Copier-header detection needs a member length for these small ROMs.
+        if Path(name).suffix.lower() in (".smc", ".sfc", ".nes"):
+            return super().hashes(name)
+        with subprocess.Popen([self.tool, "-xOf", str(self.path), name],
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
+            deadline = threading.Timer(600, process.kill)
+            deadline.daemon = True
+            deadline.start()
+            try:
+                result = hash_stream(process.stdout, suffix=Path(name).suffix)
+                if process.wait() != 0:
+                    raise OSError("could not read archive member")
+                return result
+            except BaseException:
+                process.kill()
+                raise
+            finally:
+                deadline.cancel()
+
+    def copy_set(self, members, stage):
+        # Solid 7z archives must be decoded once, rather than once per file.
+        # libarchive's default traversal and symlink protections stay enabled.
+        with tempfile.TemporaryDirectory(prefix=".romarr-import-", dir=stage.parent) as temp:
+            extracted = Path(temp) / "files"
+            extracted.mkdir()
+            manifest = Path(temp) / "members"
+            manifest.write_bytes(b"".join(member.encode("utf-8") + b"\0"
+                                          for member, _ in members))
+            subprocess.run([self.tool, "-xf", str(self.path), "-C", str(extracted),
+                            "--no-same-owner", "--no-same-permissions",
+                            "--null", "-T", str(manifest)],
+                           check=True, timeout=600, capture_output=True)
+            for member, name in members:
+                source = extracted / member.replace("\\", "/")
+                if (source.is_symlink() or not source.is_file()
+                        or not source.resolve().is_relative_to(extracted.resolve())):
+                    raise OSError("archive member is not a safe regular file")
+                # Reject symlink directories too, even when their target stays
+                # inside extraction: bundles preserve data, never link tricks.
+                if any(parent.is_symlink() for parent in source.parents
+                       if parent != extracted and parent.is_relative_to(extracted)):
+                    raise OSError("archive member traverses a symlink")
+                target = stage / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                source.replace(target)
+
 
 class _PathSource(_Source):
     """A bare ROM file, or a directory the download client already unpacked."""
@@ -211,7 +287,9 @@ class _PathSource(_Source):
         if self.path.is_file():
             return [self.path.name]
         return [str(p.relative_to(self.path)).replace("\\", "/")
-                for p in self.path.rglob("*") if p.is_file()]
+                for p in self.path.rglob("*") if p.is_file()
+                and not p.is_symlink()
+                and p.resolve().is_relative_to(self.path.resolve())]
 
     def read(self, name):
         target = self.path if self.path.is_file() else self.path / name
@@ -228,6 +306,9 @@ class _PathSource(_Source):
         # A new destination therefore follows the process umask, while the
         # source inode, owner, group and mode remain untouched.
         shutil.copyfile(source, destination)
+
+    def hashes(self, name):
+        return hash_file(self.path if self.path.is_file() else self.path / name)
 
 
 class MissingArchiveTool(Exception):
@@ -280,13 +361,15 @@ def verify_set(source, members, dats) -> Match:
     verdicts = []
     for member in members:
         try:
-            data = source.read(member)
+            hashes = source.hashes(member) if hasattr(source, "hashes") else None
+            if hashes is None:
+                data = source.read(member)
+                if data is None:
+                    return Match(UNKNOWN, detail=f"could not read {member!r} to verify")
+                hashes = hash_bytes(data, suffix=Path(member).suffix)
         except Exception:
             return Match(UNKNOWN, detail=f"could not read {member!r} to verify")
-        if data is None:
-            return Match(UNKNOWN, detail=f"could not read {member!r} to verify")
-        suffix = Path(member.replace("\\", "/")).suffix
-        verdicts.append(dats.lookup(**hash_bytes(data, suffix=suffix)))
+        verdicts.append(dats.lookup(**hashes))
 
     if not verdicts:
         return Match(UNKNOWN)
@@ -372,6 +455,12 @@ def import_rom(download: Path, platform: Platform, library_root: Path, *,
         target_dir = platform_dir(library_root, platform,
                                    layout=layout, translation=translation)
 
+        if chosen.preserve_paths:
+            results.append(_import_directory_set(
+                source, chosen, download, target_dir, library_root,
+                overwrite=overwrite, verdict=verdict))
+            continue
+
         if not chosen.is_multi_file:
             target_dir.mkdir(parents=True, exist_ok=True)
             destination = target_dir / Path(chosen.primary).name
@@ -419,6 +508,48 @@ def import_rom(download: Path, platform: Platform, library_root: Path, *,
                                         verification=verdict))
 
     return results
+
+
+def _import_directory_set(source, chosen, download, target_dir, library_root,
+                          *, overwrite, verdict):
+    """Publish a whole game tree only after all files have been copied."""
+    root_name = Path(chosen.root.rstrip("/\\")).name if chosen.root else ""
+    set_name = root_name or (download.name if download.is_dir() else download.stem)
+    destination = target_dir / set_name
+    if (not is_safe_name(set_name, target_dir)
+            or not destination.resolve().is_relative_to(library_root.resolve())
+            or destination.is_symlink()):
+        return ImportResult(False, None, "unsafe game directory")
+    if destination.exists() and not overwrite:
+        return ImportResult(False, destination, "already in the library")
+    # Preflight the complete set, including collisions on case-insensitive
+    # libraries. Do not leave half a game behind on a rejected member.
+    members = []
+    seen = set()
+    for member in chosen.members:
+        name = member.replace("\\", "/")[len(chosen.root):]
+        if not is_safe_name(name, destination) or name.casefold() in seen:
+            return ImportResult(False, destination, "unsafe or duplicate game file")
+        seen.add(name.casefold())
+        members.append((member, name))
+    target_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".romarr-import-", dir=target_dir) as temp:
+        stage = Path(temp) / "game"
+        stage.mkdir()
+        try:
+            source.copy_set(members, stage)
+            backup = Path(temp) / "previous"
+            if destination.exists():
+                destination.rename(backup)
+            try:
+                stage.rename(destination)
+            except OSError:
+                if backup.exists():
+                    backup.rename(destination)
+                raise
+        except (OSError, subprocess.SubprocessError, zipfile.BadZipFile) as exc:
+            return ImportResult(False, destination, f"game import failed: {exc}")
+    return ImportResult(True, destination, verification=verdict)
 
 
 def _set_name(primary: str) -> str:

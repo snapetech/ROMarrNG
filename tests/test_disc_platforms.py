@@ -167,12 +167,12 @@ def test_no_two_platforms_answer_to_the_same_name():
                 f"{key!r} is claimed by both {claimed} and {platform.slug}")
 
 
-def test_media_is_one_of_the_four_known_values():
+def test_media_is_one_of_the_known_values():
     # "digital" is the fourth medium: modern PC, where there is no physical
     # dump and a 100GB installer is a normal size.
     for platform in platforms.PLATFORMS:
         assert platform.media in (CARTRIDGE, DISC, COMPUTER,
-                                  "digital"), platform.slug
+                                  "digital", "package"), platform.slug
 
 
 def test_all_extensions_still_answers_for_every_platform():

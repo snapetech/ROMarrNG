@@ -83,13 +83,9 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
                                                                  "files for a "
                                                                  "SeerrNG "
                                                                  "request."),
-    "/api/v1/integration/requests/{externalRequestId}/assets/{assetId}": ("GET", "Stream "
-                                                                           "a local "
-                                                                           "request "
-                                                                           "asset, "
-                                                                           "including "
-                                                                           "HTTP byte "
-                                                                           "ranges."),
+    "/api/v1/integration/requests/{externalRequestId}/assets/{assetId}": (
+        "GET", "Stream a local request asset. Individual files support HTTP "
+        "byte ranges; directory TAR bundles stream complete trees without ranges."),
     "/api/v1/wanted/missing": ("GET", "Games wanted but not yet found. DELETE "
                                       "the same path with game and platform "
                                       "-- as query parameters or a JSON body "

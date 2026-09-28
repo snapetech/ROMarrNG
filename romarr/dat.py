@@ -159,22 +159,28 @@ def hash_file(path, *, chunk: int = 1024 * 1024) -> dict:
     # the file to decide whether it has a 512-byte header would allocate four
     # gigabytes for a PS2 image -- exactly the thing chunked hashing exists to
     # avoid, reintroduced one line above it.
-    start = header_size(path.suffix, path.stat().st_size)
+    with open(path, "rb") as handle:
+        return hash_stream(handle, suffix=path.suffix, size=path.stat().st_size,
+                           chunk=chunk)
+
+
+def hash_stream(handle, *, suffix="", size=0, chunk=1024 * 1024) -> dict:
+    """Hash an archive member with the same bounded memory as a disk file."""
+    start = header_size(suffix, size)
     crc = 0
     md5 = hashlib.md5(usedforsecurity=False)
     sha1 = hashlib.sha1(usedforsecurity=False)
     size = 0
-    with open(path, "rb") as handle:
-        if start:
-            handle.seek(start)
-        while True:
-            block = handle.read(chunk)
-            if not block:
-                break
-            crc = zlib.crc32(block, crc)
-            md5.update(block)
-            sha1.update(block)
-            size += len(block)
+    if start:
+        handle.read(start)
+    while True:
+        block = handle.read(chunk)
+        if not block:
+            break
+        crc = zlib.crc32(block, crc)
+        md5.update(block)
+        sha1.update(block)
+        size += len(block)
     return {"size": size, "crc": f"{crc & 0xFFFFFFFF:08x}",
             "md5": md5.hexdigest(), "sha1": sha1.hexdigest()}
 

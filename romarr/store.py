@@ -129,6 +129,9 @@ class QueueItem:
     blocklisted: bool = False
     # SeerrNG's request identity, when ROMarr was dispatched by SeerrNG.
     external_request_id: str = ""
+    # Exact imported destinations for this request, persisted across restarts.
+    # Release filenames and console title IDs need not equal the catalog title.
+    imported_paths: list[str] = field(default_factory=list)
 
 
 @dataclass

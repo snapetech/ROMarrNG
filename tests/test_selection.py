@@ -46,7 +46,7 @@ def test_longer_alias_wins_over_shorter_substring():
 
 
 def test_unknown_platform_is_none_not_a_guess():
-    assert resolve("PlayStation 5") is None
+    assert resolve("Unknown future console") is None
     assert resolve("") is None
 
 
@@ -63,16 +63,16 @@ def test_unknown_platform_is_none_not_a_guess():
 # ceiling, NES extensions and an NES import route, and every one of those is
 # wrong in a way nothing downstream can detect.
 
-def test_a_machine_we_do_not_model_resolves_to_nothing():
+def test_recent_machines_do_not_resolve_to_older_console_prefixes():
     """A shorter alias must not swallow the longer name that contains it.
 
-    "PlayStation Vita" contains "playstation" (a PSX alias). The machine is
-    not modelled here, so the only correct answer is None -- 34 Vita rows
-    were answering as PS1. "Nintendo Switch" is the same trap against the
+    "PlayStation Vita" contains "playstation" (a PSX alias). Its explicit
+    registration must resolve to Vita -- 34 Vita rows previously answered
+    as PS1. "Nintendo Switch" is the same trap against the
     NES alias "nintendo", and it is asserted separately below because Switch
     IS now modelled: it must resolve to its own platform, never to NES.
     """
-    assert resolve("PlayStation Vita") is None
+    assert resolve("PlayStation Vita").slug == "psvita"
     # Switch is modelled (issue #23): its name contains "nintendo", an NES
     # alias, so the resolution has to reach the switch platform and not the
     # shorter prefix. 2,874 Switch rows were answering as NES before the
@@ -633,6 +633,7 @@ def test_every_platform_declares_a_ceiling_matched_to_its_medium():
         # exists to reject romsets-pretending-to-be-cartridges, a failure
         # mode digital does not have.
         "digital": 300 * GB,
+        "package": 513 * GB,
     }
     # Cards one order past the cartridge-era norm. Capped per platform
     # because the ceiling differs by an order of magnitude between them:
