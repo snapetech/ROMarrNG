@@ -340,8 +340,13 @@ def test_partial_request_import_is_failed_and_not_deliverable(tmp_path, monkeypa
     assert view["status"] == "failed"
     assert view["error"] == "disk full"
     assert not view["deliverable"]
+    service._library_cache = ([SimpleNamespace(name="Game", platform="ps5")], 0, 0)
+    service._library_partial = False
+    titles = [{"title": "Game", "platform": "ps5"}]
+    assert _seerr_library_lookup(service, titles)["matches"] == []
     # A subsequent successful retry must recover delivery despite the old row.
     service.queue.append(QueueItem("Game", "ps5", "Game.PS5.retry", 10,
                                   "imported", external_request_id="seerr-1",
                                   imported_paths=[str(imported)]))
     assert _seerr_local_assets(service, request)
+    assert _seerr_library_lookup(service, titles)["matches"] == titles

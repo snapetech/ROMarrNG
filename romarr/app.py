@@ -171,11 +171,16 @@ def _seerr_library_lookup(service, titles: list[dict]) -> dict:
         for item in titles
     }
     matches = {}
+    latest = {(item.platform, _seerr_title_key(item.game)): item
+              for item in service.queue}
+    incomplete = {key for key, item in latest.items()
+                  if item.state == "import-failed"}
     # Preserve catalog identity even when an imported package/folder is named
     # by a console title ID rather than the title the user requested.
     for item in service.queue:
         key = (item.platform, _seerr_title_key(item.game))
-        if item.state != "imported" or not item.imported_paths or key not in requested:
+        if (item.state != "imported" or not item.imported_paths
+                or key not in requested or key in incomplete):
             continue
         target = service.library_for(item.platform) or service.default_library()
         if target is None:
@@ -195,7 +200,7 @@ def _seerr_library_lookup(service, titles: list[dict]) -> dict:
         if platform is None:
             continue
         key = (platform.slug, _seerr_title_key(game.name))
-        if key in requested:
+        if key in requested and key not in incomplete:
             matches[key] = requested[key]
             if len(matches) == len(requested):
                 break
