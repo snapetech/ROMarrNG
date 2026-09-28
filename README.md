@@ -15,9 +15,12 @@ Move Weight
 ROMarr runs perfectly well on its own — nothing above it is required.
 
 On Unraid, the [ROMarrNG fork template](packaging/unraid/romarrng.xml) installs
-the standalone `ghcr.io/snapetech/romarrng:latest` image. It is the canonical
-ROMarrNG Unraid template; SeerrNG does not include another copy. Connect
-SeerrNG only if you want its request and catalog integration.
+the standalone `ghcr.io/snapetech/romarrng:latest` image. Map persistent
+appdata to `/config`, your game library to `/roms`, and completed downloads to
+`/downloads`. Open the web interface on port 6868 to set your password and
+configure indexers and a download client. Connect SeerrNG if you want its
+request and catalog integration. For package or integration support, use the
+[SeerrNG issue tracker](https://github.com/snapetech/seerrng/issues).
 
 [ROM Hub](https://github.com/BlizzHacker/rom-hub) is ROMarr's plugin factory:
 it is where a source is written, run and sandboxed, and ROMarr picks the
