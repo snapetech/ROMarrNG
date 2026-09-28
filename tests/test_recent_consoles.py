@@ -4,7 +4,7 @@ import zipfile
 
 import pytest
 
-from romarr.app import ROMarr, _seerr_local_assets, _seerr_library_lookup
+from romarr.app import ROMarr, _seerr_local_assets, _seerr_library_lookup, _seerr_request_view
 from romarr.dat import hash_bytes, hash_stream
 from romarr.game_assets import bundle_range, directory_asset, stream_directory
 from romarr.libraries import FolderConfig, FolderLibrary
@@ -308,3 +308,40 @@ def test_download_import_records_the_actual_request_destinations(tmp_path, monke
     assert service.queue[0].imported_paths == [str(root / "ps5" / "PPSA12345")]
     [asset] = _seerr_local_assets(service, SeerrRequest("seerr-1", "Catalog Game", "ps5"))
     assert len(asset["members"]) == 3
+
+
+def test_partial_request_import_is_failed_and_not_deliverable(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from romarr.library import ImportResult
+    service = ROMarr({"ROMARR_DATA": str(tmp_path / "state.json")})
+    source = tmp_path / "Game.zip"
+    service.clients = [SimpleNamespace(configured=True, completed=lambda: [
+        {"name": "Game.PS5", "content_path": str(source)},
+    ])]
+    service.queue.append(QueueItem("Game", "ps5", "Game.PS5", 10,
+                                  "grabbed", external_request_id="seerr-1"))
+    root = tmp_path / "library"
+    root.mkdir()
+    imported = root / "Game.pkg"
+    imported.write_bytes(b"partial")
+    monkeypatch.setattr(service, "library_for", lambda _: (
+        {"path": str(root)}, SimpleNamespace(rescan=lambda _: True)))
+    monkeypatch.setattr(service, "notify", lambda _: None)
+    monkeypatch.setattr("romarr.app.import_rom", lambda *_, **__: [
+        ImportResult(True, imported), ImportResult(False, None, "disk full"),
+    ])
+    [result] = service.import_finished()
+    assert not result["ok"]
+    assert result["reason"] == "disk full"
+    assert service.queue[0].state == "import-failed"
+    request = SeerrRequest("seerr-1", "Game", "ps5")
+    assert _seerr_local_assets(service, request) == []
+    view = _seerr_request_view(service, request)
+    assert view["status"] == "failed"
+    assert view["error"] == "disk full"
+    assert not view["deliverable"]
+    # A subsequent successful retry must recover delivery despite the old row.
+    service.queue.append(QueueItem("Game", "ps5", "Game.PS5.retry", 10,
+                                  "imported", external_request_id="seerr-1",
+                                  imported_paths=[str(imported)]))
+    assert _seerr_local_assets(service, request)

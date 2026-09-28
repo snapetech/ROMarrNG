@@ -238,9 +238,12 @@ def _seerr_local_assets(service, request: SeerrRequest) -> list[dict]:
         return []
 
     assets: list[dict] = []
-    imported_rows = [{"id": path} for item in service.queue
-                     if item.external_request_id == request.external_request_id
-                     and item.state == "imported" for path in item.imported_paths]
+    related = [item for item in service.queue
+               if item.external_request_id == request.external_request_id]
+    if related and related[-1].state == "import-failed":
+        return []
+    imported_rows = [{"id": path} for item in related
+                     if item.state == "imported" for path in item.imported_paths]
     for row in imported_rows or _seerr_library_matches(service, request):
         source = Path(str(row.get("id") or ""))
         if not source.is_absolute():
@@ -4584,6 +4587,11 @@ class ROMarr:
                 continue
 
             any_ok = any(o.ok for o in outcomes)
+            # A standalone batch can import several games independently. A
+            # SeerrNG request must not become available after a partial import.
+            request_ok = any_ok and (
+                not queue_item or not queue_item.external_request_id
+                or all(outcome.ok for outcome in outcomes))
             for outcome in outcomes:
                 if outcome.ok:
                     self.store.record(Event(kind="imported", game=name,
@@ -4600,7 +4608,10 @@ class ROMarr:
             if queue_item is not None:
                 # Marked so the scheduled sweep never re-attempts it; the
                 # Tasks page button clears failure marks to retry.
-                queue_item.state = "imported" if any_ok else "import-failed"
+                queue_item.state = "imported" if request_ok else "import-failed"
+                if not request_ok:
+                    queue_item.detail = next((outcome.reason for outcome in outcomes
+                                              if not outcome.ok), "incomplete game import")
                 queue_item.imported_paths = [str(outcome.destination.resolve())
                                              for outcome in outcomes
                                              if outcome.ok and outcome.destination]
@@ -4608,10 +4619,12 @@ class ROMarr:
                 if self.store.settings.get("rescan_after_import", True):
                     target_lib.rescan(platform.slug)
                 for w in list(self.store.wanted):
-                    if w.platform == platform.slug and w.game.lower() in name.lower():
+                    if request_ok and w.platform == platform.slug and w.game.lower() in name.lower():
                         self.store.fulfil(w.game, w.platform)
-            results.append({"name": name, "ok": any_ok,
-                            "reason": "" if any_ok else str(outcomes[0].reason),
+            results.append({"name": name, "ok": request_ok,
+                            "reason": "" if request_ok else next(
+                                (outcome.reason for outcome in outcomes if not outcome.ok),
+                                "incomplete game import"),
                             "library": label})
         # The sweep marks rows in place; without this the marks live only in
         # memory and a restart re-imports everything it had already done.
