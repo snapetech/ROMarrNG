@@ -1,6 +1,6 @@
 # ROMarr.
 #
-#   curl -O https://raw.githubusercontent.com/BlizzHacker/romarr/main/docker-compose.yml
+#   curl -O https://raw.githubusercontent.com/snapetech/ROMarrNG/main/docker-compose.yml
 #   ROMARR_ROMS=/mnt/roms ROMARR_DOWNLOADS=/mnt/downloads docker compose up -d
 #
 # Then open http://localhost:6868 and set a password. Everything else can be

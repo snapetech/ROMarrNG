@@ -11,7 +11,7 @@ implying otherwise.
 ## Reporting a vulnerability
 
 Report privately through GitHub's
-[security advisories](https://github.com/BlizzHacker/romarr/security/advisories/new).
+[security advisories](https://github.com/snapetech/ROMarrNG/security/advisories/new).
 Please do not open a public issue for anything exploitable.
 
 Include what you were running, what you did, and what happened. A proof of

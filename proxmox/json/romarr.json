@@ -10,8 +10,8 @@
   "privileged": false,
   "has_arm": true,
   "interface_port": 6868,
-  "documentation": "https://github.com/BlizzHacker/romarr#readme",
-  "website": "https://github.com/BlizzHacker/romarr",
+  "documentation": "https://github.com/snapetech/ROMarrNG#readme",
+  "website": "https://github.com/snapetech/ROMarrNG",
   "logo": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/webp/romm.webp",
   "description": "ROMarr is the *arr for games. It watches for game requests, searches your indexers through Prowlarr, hands the winner to qBittorrent, SABnzbd or NZBGet depending on the release's protocol, picks the ROM out of the finished download and files it into RomM where it can be played. Release ranking is built for cartridges rather than video: it scores region and revision instead of bitrate, treats a large result as a warning rather than a preference, and rejects prototypes, hacks and cross-console mismatches.",
   "install_methods": [

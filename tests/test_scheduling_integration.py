@@ -142,7 +142,7 @@ def test_update_check_notices_a_newer_release(tmp_path, monkeypatch):
 
         def json(self):
             return {"tag_name": "v99.0.0",
-                    "html_url": "https://github.com/BlizzHacker/romarr/releases/v99.0.0"}
+                    "html_url": "https://github.com/snapetech/ROMarrNG/releases/v99.0.0"}
 
     import requests as _requests
     monkeypatch.setattr(_requests, "get", lambda *a, **kw: FakeResponse())

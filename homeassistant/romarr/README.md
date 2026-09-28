@@ -9,7 +9,7 @@ documents can be set here.
 ## Install
 
 1. Settings → Add-ons → Add-on Store → ⋮ → **Repositories**
-2. Add `https://github.com/BlizzHacker/romarr`
+2. Add `https://github.com/snapetech/ROMarrNG`
 3. Install **ROMarr**, set at least `romarr_password`, start it.
 4. Open `http://homeassistant.local:6868`.
 

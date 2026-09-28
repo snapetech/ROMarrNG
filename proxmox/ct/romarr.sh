@@ -4,10 +4,10 @@
 #
 # Author: BlizzHacker
 # License: MIT
-# Source: https://github.com/BlizzHacker/romarr
+# Source: https://github.com/snapetech/ROMarrNG
 #
 # Run on a Proxmox VE host:
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/BlizzHacker/romarr/main/proxmox/ct/romarr.sh)"
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/snapetech/ROMarrNG/main/proxmox/ct/romarr.sh)"
 #
 # Self-contained on purpose. This script used to source community-scripts'
 # build.func, which then fetched `install/<app>.sh` from *its own* repository.
@@ -23,7 +23,7 @@ set -euo pipefail
 
 APP="ROMarr"
 APP_PORT="${APP_PORT:-6868}"
-REPO="${REPO:-BlizzHacker/romarr}"
+REPO="${REPO:-snapetech/ROMarrNG}"
 
 # Container defaults. Every one is overridable from the environment, so an
 # unattended install is `CTID=123 DISK=8 bash -c "$(curl ...)"`.

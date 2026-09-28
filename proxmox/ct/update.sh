@@ -3,7 +3,7 @@
 # Update an existing ROMarr install, in place.
 #
 # Run inside the container:
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/BlizzHacker/romarr/main/proxmox/ct/update.sh)"
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/snapetech/ROMarrNG/main/proxmox/ct/update.sh)"
 #
 # Or from the Proxmox host:
 #   pct exec <ctid> -- bash -c "$(curl -fsSL .../update.sh)"
@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-REPO="${REPO:-BlizzHacker/romarr}"
+REPO="${REPO:-snapetech/ROMarrNG}"
 ROOT="${ROOT:-/opt/romarr}"
 
 RD=$'\033[01;31m'; GN=$'\033[1;92m'; YW=$'\033[33m'; CL=$'\033[m'

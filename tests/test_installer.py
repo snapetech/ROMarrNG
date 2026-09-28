@@ -37,7 +37,7 @@ def test_the_installer_exists_where_the_readme_says_it_does():
         README.read_text(encoding="utf-8"))
     assert command, "README no longer documents a raw installer URL"
     repo, branch, path = command.groups()
-    assert repo == "BlizzHacker/romarr", f"README points at {repo}"
+    assert repo == "snapetech/ROMarrNG", f"README points at {repo}"
     assert branch == "main"
     assert (ROOT / path).is_file(), (
         f"README's install command fetches {path!r}, which is not in the repo. "
@@ -66,11 +66,11 @@ def test_every_url_the_installer_uses_is_one_we_control():
         for url in re.findall(r"https://[^\s\"')]+",
                               script.read_text(encoding="utf-8")):
             assert any(host in url for host in (
-                "github.com/BlizzHacker/romarr",
+                "github.com/snapetech/ROMarrNG",
                 "api.github.com/repos/${REPO}",
                 "github.com/${REPO}",
                 "raw.githubusercontent.com/${REPO}",
-                "raw.githubusercontent.com/BlizzHacker/romarr",
+                "raw.githubusercontent.com/snapetech/ROMarrNG",
             )), f"{script.name} reaches {url}, which we do not control"
 
 

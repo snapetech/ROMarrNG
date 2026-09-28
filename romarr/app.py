@@ -109,7 +109,7 @@ from .ui import login_page as ui_login_page
 
 log = logging.getLogger(__name__)
 
-VERSION = "0.9.0"
+VERSION = "0.10.0"
 
 # What ROMarr labels its own downloads with, so its jobs are distinguishable
 # from everything else in a shared client -- the same reason Radarr and Sonarr
@@ -4217,7 +4217,7 @@ class ROMarr:
                 f"grabbed {grabbed_count}")
 
     #: Where release news comes from. Only ever read, never written to.
-    RELEASES_URL = "https://api.github.com/repos/BlizzHacker/romarr/releases/latest"
+    RELEASES_URL = "https://api.github.com/repos/snapetech/ROMarrNG/releases/latest"
 
     def check_update(self) -> dict:
         """Ask github.com whether a newer ROMarr exists. Telling somebody is

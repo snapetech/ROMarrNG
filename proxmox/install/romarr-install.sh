@@ -3,7 +3,7 @@
 # Copyright (c) 2021-2026 community-scripts ORG
 # Author: BlizzHacker
 # License: MIT | https://github.com/community-scripts/ProxmoxVED/raw/main/LICENSE
-# Source: https://github.com/BlizzHacker/romarr
+# Source: https://github.com/snapetech/ROMarrNG
 
 source /dev/stdin <<<"$FUNCTIONS_FILE_PATH"
 color
@@ -20,7 +20,7 @@ msg_info "Installing Dependencies"
 $STD apt-get install -y python3-venv libarchive-tools
 msg_ok "Installed Dependencies"
 
-fetch_and_deploy_gh_release "romarr" "BlizzHacker/romarr" "tarball" "latest" "/opt/romarr"
+fetch_and_deploy_gh_release "romarr" "snapetech/ROMarrNG" "tarball" "latest" "/opt/romarr"
 
 # Refuse to leave an unauthenticated ROMarr on somebody's network.
 #
@@ -31,7 +31,7 @@ fetch_and_deploy_gh_release "romarr" "BlizzHacker/romarr" "tarball" "latest" "/o
 # script cannot fall back to main the way ct/romarr.sh does -- the framework
 # owns the fetch -- so it stops instead of finishing quietly.
 if [[ ! -f /opt/romarr/romarr/auth.py ]]; then
-  msg_error "The published release has no romarr/auth.py -- it predates authentication. Install from https://github.com/BlizzHacker/romarr/blob/main/proxmox/ct/romarr.sh instead, which falls back to main."
+  msg_error "The published release has no romarr/auth.py -- it predates authentication. Install from https://github.com/snapetech/ROMarrNG/blob/main/proxmox/ct/romarr.sh instead, which falls back to main."
   exit 1
 fi
 

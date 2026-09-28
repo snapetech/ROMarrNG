@@ -94,7 +94,7 @@ The recommended install.
 
 ```bash
 mkdir -p /srv/romarr && cd /srv/romarr
-curl -O https://raw.githubusercontent.com/BlizzHacker/romarr/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/snapetech/ROMarrNG/main/docker-compose.yml
 ```
 
 Create a `.env` beside it with your two host paths:
@@ -224,7 +224,7 @@ board is worth more than another CI build.
 On a Proxmox VE host, as root:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/BlizzHacker/romarr/main/proxmox/ct/romarr.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/snapetech/ROMarrNG/main/proxmox/ct/romarr.sh)"
 ```
 
 It creates an unprivileged Debian 13 container, installs ROMarr into
@@ -251,7 +251,7 @@ CTID=123 DISK=8 RAM=1024 ROM_PATH=/mnt/roms \
 | `UNPRIVILEGED` | `1` | |
 | `ROM_PATH` | `/mnt/roms` | Also added to the unit's `ReadWritePaths` |
 | `APP_PORT` | `6868` | |
-| `REPO` | `BlizzHacker/romarr` | For forks |
+| `REPO` | `snapetech/ROMarrNG` | Source repository |
 
 The script is deliberately self-contained. It used to source community-scripts'
 `build.func`, which then fetched `install/<app>.sh` from *their* repository —
@@ -296,7 +296,7 @@ with `root_squash`, that is the thing to know.
 ## Home Assistant
 
 *Settings → Add-ons → Add-on Store → ⋮ → Repositories*, add
-`https://github.com/BlizzHacker/romarr`, install **ROMarr**.
+`https://github.com/snapetech/ROMarrNG`, install **ROMarr**.
 
 It runs the same image Docker users run — ROMarr reads Home Assistant's
 `/data/options.json` natively, so there is no add-on-specific build and no
@@ -316,7 +316,7 @@ them.
 Python 3.11 or newer. Dependencies are `requests` plus, on Linux, `pyseccomp`.
 
 ```bash
-git clone https://github.com/BlizzHacker/romarr.git && cd romarr
+git clone https://github.com/snapetech/ROMarrNG.git && cd ROMarrNG
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env          # edit it
@@ -698,7 +698,7 @@ need to know what changed; pin a `sha-` tag if you would rather decide.
 ### Proxmox LXC
 
 ```bash
-pct exec <ctid> -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/BlizzHacker/romarr/main/proxmox/ct/update.sh)"
+pct exec <ctid> -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/snapetech/ROMarrNG/main/proxmox/ct/update.sh)"
 ```
 
 or the same `bash -c "$(curl ...)"` from inside the container.
@@ -736,10 +736,10 @@ docker compose up -d
 List what exists:
 
 ```bash
-TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:blizzhacker/romarr:pull" \
+TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:snapetech/romarrng:pull" \
         | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 curl -s -H "Authorization: Bearer $TOKEN" \
-     https://ghcr.io/v2/blizzhacker/romarr/tags/list
+     https://ghcr.io/v2/snapetech/romarrng/tags/list
 ```
 
 **A rollback is code-only.** If the version you are leaving wrote a setting the

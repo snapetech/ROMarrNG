@@ -1,4 +1,4 @@
-# ROMarr
+# ROMarrNG
 
 **The *arr for games.** Request a title — ROMarr searches your indexers, picks the
 best release, hands it to your download client, and files the ROM into your game
@@ -29,9 +29,10 @@ patching ROMarr.
 
 If you run Radarr for films and Sonarr for TV, this is the missing one.
 
-[![CI](https://github.com/BlizzHacker/romarr/actions/workflows/docker.yml/badge.svg)](https://github.com/BlizzHacker/romarr/actions/workflows/docker.yml)
+[![CI](https://github.com/snapetech/ROMarrNG/actions/workflows/docker.yml/badge.svg)](https://github.com/snapetech/ROMarrNG/actions/workflows/docker.yml)
 [![licence MIT](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ed)](https://github.com/BlizzHacker/romarr/pkgs/container/romarr)
+[![Release](https://img.shields.io/github/v/release/snapetech/ROMarrNG)](https://github.com/snapetech/ROMarrNG/releases)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ed)](https://github.com/snapetech/ROMarrNG/pkgs/container/romarrng)
 [![platforms](https://img.shields.io/badge/arch-amd64%20%7C%20arm64%20%7C%20armv7-lightgrey)](#docker)
 
 ![Interactive search on a live install: 51 releases scored, the verified dump on top, every rejection explained](docs/img/interactive-search-live.png)
@@ -345,7 +346,7 @@ setting commented ships in the repo:
 
 ```bash
 mkdir -p /srv/romarr && cd /srv/romarr
-curl -O https://raw.githubusercontent.com/BlizzHacker/romarr/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/snapetech/ROMarrNG/main/docker-compose.yml
 printf 'ROMARR_ROMS=/mnt/roms\nROMARR_DOWNLOADS=/mnt/downloads\n' > .env
 docker compose up -d
 ```
@@ -360,7 +361,7 @@ Settings page will say so; those two could only be wrong silently.
 ### Proxmox LXC
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/BlizzHacker/romarr/main/proxmox/ct/romarr.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/snapetech/ROMarrNG/main/proxmox/ct/romarr.sh)"
 ```
 
 It waits for `/api/health` to answer before claiming success, refuses to deploy
@@ -373,14 +374,14 @@ start.
 ### Home Assistant
 
 Settings → Add-ons → Add-on Store → ⋮ → Repositories, add
-`https://github.com/BlizzHacker/romarr`, install **ROMarr**. Options set on
+`https://github.com/snapetech/ROMarrNG`, install **ROMarr**. Options set on
 the add-on page become ROMarr's environment — see
 [homeassistant/romarr](homeassistant/romarr/README.md).
 
 ### From source
 
 ```bash
-git clone https://github.com/BlizzHacker/romarr.git && cd romarr
+git clone https://github.com/snapetech/ROMarrNG.git && cd ROMarrNG
 pip install -r requirements.txt
 cp .env.example .env          # edit it
 set -a; . ./.env; set +a
@@ -943,7 +944,7 @@ download clients and library backends; a .NET owner for the contrib
 plugins; Home Assistant users for the add-on; DAT sources for platforms
 beyond No-Intro/Redump coverage; and issues — a report with a log line is
 usually fixed the same week. Open issues:
-[github.com/BlizzHacker/romarr/issues](https://github.com/BlizzHacker/romarr/issues).
+[github.com/snapetech/ROMarrNG/issues](https://github.com/snapetech/ROMarrNG/issues).
 
 ---
 
@@ -954,7 +955,7 @@ stack by MoveWeight.
 
 | | Project | Purpose |
 |---|---|---|
-| **Acquire** | [ROMarr](https://github.com/BlizzHacker/romarr) | Request, find, grab, file |
+| **Acquire** | [ROMarr](https://github.com/snapetech/ROMarrNG) | Request, find, grab, file |
 | | [ROM Hub](https://github.com/BlizzHacker/rom-hub) | Plugin host — the sources ROMarr searches |
 | **Play** | [Desktop](https://github.com/BlizzHacker/RommForDesktop) · [Xbox](https://github.com/BlizzHacker/RommForXbox) · [Roku](https://github.com/BlizzHacker/RommForRoku) | Clients |
 | | [Stream Server](https://github.com/BlizzHacker/RommStreamServer) | Remote play |

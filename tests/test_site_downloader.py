@@ -311,7 +311,7 @@ def test_we_say_who_we_are(tmp_path):
     client.add("https://example.invalid/rom.zip")
     client.completed()
     agents = {c.get("headers", {}).get("User-Agent") for c in session.calls}
-    assert agents == {"ROMarr (+https://github.com/BlizzHacker/romarr)"}
+    assert agents == {"ROMarr (+https://github.com/snapetech/ROMarrNG)"}
 
 
 # --- the browser lane -------------------------------------------------------
@@ -690,7 +690,7 @@ def test_the_referer_the_browser_sends_is_one_it_actually_earned(tmp_path):
     # Chromium's own identity, with ROMarr's token appended so an operator
     # reading their access log can tell exactly what visited them.
     assert "Chrome/" in VaultHandler.seen["agent"]
-    assert "ROMarr (+https://github.com/BlizzHacker/romarr)" in VaultHandler.seen["agent"]
+    assert "ROMarr (+https://github.com/snapetech/ROMarrNG)" in VaultHandler.seen["agent"]
 
     saved = pathlib.Path(done[0]["content_path"])
     assert saved.name == "Contra (USA).zip"
