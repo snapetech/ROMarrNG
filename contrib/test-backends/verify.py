@@ -1,4 +1,4 @@
-"""Ask the live fixtures the four questions, using Romarr's own backend code.
+"""Ask the live fixtures the four questions, using ROMarr's own backend code.
 
 tests/test_libraries.py is mocked, which is the right default -- it is fast and
 it pins the request shapes a real server was observed to want. What a mock
@@ -33,7 +33,7 @@ GASEOUS_PORT, RETROM_PORT = 5198, 5101
 # account at all -- an empty Users table and no registration endpoint -- so one
 # has to be created before it will answer anything. See bootstrap_gaseous.
 GASEOUS_USER = "romarr@example.com"
-GASEOUS_PASSWORD = "Romarr-Test-1"
+GASEOUS_PASSWORD = "ROMarr-Test-1"
 
 
 def bootstrap_gaseous(base_url: str) -> None:
@@ -92,7 +92,7 @@ def check(kind: str, url: str, env: dict[str, str]) -> bool:
     ask("reachable", lib.reachable)
     ask("count", lib.count)
     ask("games", lambda: f"{len(lib.games(limit=5))} returned")
-    # Optional everywhere in Romarr, so a False here is reported rather than
+    # Optional everywhere in ROMarr, so a False here is reported rather than
     # fatal -- but an exception still is.
     ask("rescan", lib.rescan)
     return ok

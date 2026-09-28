@@ -19,8 +19,8 @@ python contrib/test-backends/verify.py --host 192.168.0.94  # fixtures elsewhere
 docker compose -f contrib/test-backends/docker-compose.yml down -v
 ```
 
-`verify.py` asks both backends the four questions Romarr asks — is it up, how
-many games, which games, please rescan — through Romarr's own `build_library`,
+`verify.py` asks both backends the four questions ROMarr asks — is it up, how
+many games, which games, please rescan — through ROMarr's own `build_library`,
 so there is no second copy of the request shapes to drift out of step. A fresh
 fixture holds no games, so a count of zero is a pass; what is under test is
 that every call is accepted and decodes.
@@ -41,7 +41,7 @@ unauthenticated bootstrap the web UI's own first-run wizard uses:
 ```bash
 curl -X POST http://localhost:5198/api/v1.1/FirstSetup/0 \
   -H 'Content-Type: application/json' \
-  -d '{"userName":"romarr@example.com","email":"romarr@example.com","password":"Romarr-Test-1","confirmPassword":"Romarr-Test-1"}'
+  -d '{"userName":"romarr@example.com","email":"romarr@example.com","password":"ROMarr-Test-1","confirmPassword":"ROMarr-Test-1"}'
 ```
 
 The password must be at least 10 characters. The route disappears once a user
@@ -65,14 +65,14 @@ Worth knowing before you bump:
 * **Gaseous `:latest` is a year stale.** It resolves to a build from
   2025-07-31, reporting version 1.7.14.0 — that is what the backend was written
   against. `v2.0.0-rc.3` is far newer and has never been checked against
-  Romarr.
+  ROMarr.
 * **Retrom `:latest`** was built 2026-06-14. Its grpc-web framing and protobuf
   field numbers are what `RetromLibrary` decodes.
 * The Postgres and MariaDB digests are incidental and safe to bump.
 
 IGDB credentials are optional. Gaseous starts, reports healthy, and answers all
-four of Romarr's questions with `igdbclientid` and `igdbclientsecret` empty —
-Romarr never reads IGDB. It will fill its log with Twitch OAuth 400s while
+four of ROMarr's questions with `igdbclientid` and `igdbclientsecret` empty —
+ROMarr never reads IGDB. It will fill its log with Twitch OAuth 400s while
 trying to enrich platform metadata, which is noise, not failure. Set them in
 `.env` (see `.env.example`) only if you are specifically testing Gaseous
 metadata.
@@ -87,7 +87,7 @@ open observations:
 * **`rescan` returns False on Gaseous 1.7.14.** `GaseousLibrary.rescan` posts
   to `/api/v1.1/ContentManager/Rescan`, which 404s. That path is absent from
   the build's own OpenAPI document, and so is any other scan trigger — 1.7.14
-  seems to scan only on its background-task schedule. Romarr treats rescan as a
+seems to scan only on its background-task schedule. ROMarr treats rescan as a
   courtesy call by design, so an import still succeeds and is reported as such;
   the call is simply a no-op here. It may exist on 2.x, which would be a reason
   to bump the digest.

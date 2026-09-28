@@ -1,6 +1,6 @@
 # Throwaway Gaseous and Retrom servers for exercising romarr/libraries.py.
 #
-# Romarr's backend tests are mocked, so nothing here is needed to run them.
+# ROMarr's backend tests are mocked, so nothing here is needed to run them.
 # This is for the other job: proving the mocked request shapes still match a
 # real server after an upstream release. See README.md.
 #
@@ -15,7 +15,7 @@ services:
   gaseous:
     # ghcr.io/gaseous-project/gaseousserver:latest as of 2026-07-29 -- an image
     # built 2025-07-31. Upstream's `latest` is a year stale; v2.0.0-rc.3 is far
-    # newer and has never been checked against Romarr.
+    # newer and has never been checked against ROMarr.
     image: ghcr.io/gaseous-project/gaseousserver@sha256:5e506593ff09533f23e742470da2ef37ffe4051f3559dad3b038e81444df75a6
     container_name: romarr-gaseous
     # Deliberately not `unless-stopped`. An earlier copy of this file used it,
@@ -30,7 +30,7 @@ services:
       - dbhost=gaseousdb
       - dbuser=root
       - dbpass=${GASEOUS_DB_PASSWORD:-gaseous}
-      # Only needed if you want Gaseous to enrich metadata from IGDB. Romarr
+      # Only needed if you want Gaseous to enrich metadata from IGDB. ROMarr
       # never reads IGDB, and the backend answers all four of its questions
       # with these empty -- verified 2026-07-29.
       - igdbclientid=${IGDB_CLIENT_ID:-}
