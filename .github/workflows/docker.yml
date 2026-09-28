@@ -14,6 +14,12 @@ permissions:
   contents: read
   packages: write
 
+# A newer main push supersedes its old image; never let an older build
+# finish later and overwrite latest. Tag builds keep separate groups.
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
