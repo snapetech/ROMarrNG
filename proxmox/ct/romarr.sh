@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ROMarr -- Proxmox LXC installer.
+# ROMarrNG -- Proxmox LXC installer.
 #
 # Author: BlizzHacker
 # License: MIT
@@ -12,16 +12,16 @@
 # Self-contained on purpose. This script used to source community-scripts'
 # build.func, which then fetched `install/<app>.sh` from *its own* repository.
 # That framework is built for scripts that live inside community-scripts, and
-# ROMarr does not, so the fetch 404'd and the documented install command could
+# ROMarrNG does not, so the fetch 404'd and the documented install command could
 # never work (issue #2). It also meant every rename on their side -- ProxmoxVE
 # to ProxmoxVED had already happened once -- silently broke our installer.
 #
-# When ROMarr is accepted into community-scripts, their copy lives in their
+# When ROMarrNG is accepted into community-scripts, their copy lives in their
 # repo and uses their framework. This one answers to nobody but us.
 
 set -euo pipefail
 
-APP="ROMarr"
+APP="ROMarrNG"
 APP_PORT="${APP_PORT:-6868}"
 REPO="${REPO:-snapetech/ROMarrNG}"
 
@@ -173,7 +173,7 @@ pct exec "$CTID" -- bash -c "
   tar -xzf /tmp/romarr.tar.gz -C /opt/romarr --strip-components=1
   rm -f /tmp/romarr.tar.gz
 
-  # Refuse to leave an unauthenticated ROMarr on somebody's network.
+  # Refuse to leave an unauthenticated ROMarrNG on somebody's network.
   #
   # The published release can lag main by a long way -- v0.7.0 was tagged
   # before authentication existed at all, so installing 'latest' produced an
@@ -202,7 +202,7 @@ pct exec "$CTID" -- bash -c "
 " || die "Python environment setup failed."
 msg "Virtualenv ready"
 
-# ROMarr starts and serves its UI with none of these reachable, and the
+# ROMarrNG starts and serves its UI with none of these reachable, and the
 # Settings pages say which are missing -- a first run is never a blank failure.
 # Authentication is deliberately not pre-set: the first visit to the web UI
 # asks for a password, which is how the install gets claimed.
@@ -236,7 +236,7 @@ info "Creating service"
 pct exec "$CTID" -- bash -c "
 cat >/etc/systemd/system/romarr.service <<'SVCEOF'
 [Unit]
-Description=ROMarr - the *arr for games
+Description=ROMarrNG - the *arr for games
 After=network-online.target
 Wants=network-online.target
 

@@ -1,4 +1,4 @@
-# ROMarr.
+# ROMarrNG.
 #
 #   curl -O https://raw.githubusercontent.com/snapetech/ROMarrNG/main/docker-compose.yml
 #   ROMARR_ROMS=/mnt/roms ROMARR_DOWNLOADS=/mnt/downloads docker compose up -d
@@ -26,16 +26,16 @@ services:
     ports:
       - "6868:6868"
     environment:
-      # Who owns the ROMs ROMarr writes. Use the same ids as your library app,
+      # Who owns the ROMs ROMarrNG writes. Use the same ids as your library app,
       # or `id -u` / `id -g` for your media user.
       PUID: 1000
       PGID: 1000
-      # New ROMarr files: 0664, directories: 0775. Existing downloads are
-      # never chmod'd or chown'd by ROMarr.
+      # New ROMarrNG files: 0664, directories: 0775. Existing downloads are
+      # never chmod'd or chown'd by ROMarrNG.
       UMASK: "002"
       TZ: Etc/UTC
 
-      # Authentication. ROMarr requires a credential by default; leave this
+      # Authentication. ROMarrNG requires a credential by default; leave this
       # commented and the first visit to the web UI asks you to set a
       # password. Uncomment to claim the install before it ever serves a
       # request, so there is no unclaimed window at all.
@@ -49,7 +49,7 @@ services:
       # proxy as the authority and verifies requests came through it. See
       # .env.example for the full set of forward-auth variables.
 
-      # Prowlarr -- how ROMarr finds releases.
+      # Prowlarr -- how ROMarrNG finds releases.
       PROWLARR_URL: http://prowlarr:9696
       PROWLARR_API_KEY: ""
 
@@ -78,23 +78,23 @@ services:
       # NZBGET_USER: ""
       # NZBGET_PASS: ""
 
-      # What ROMarr labels its own downloads with, per client. Defaults to
+      # What ROMarrNG labels its own downloads with, per client. Defaults to
       # "romarr". The category does NOT have to exist in the client first --
-      # SABnzbd keeps an undefined one verbatim and ROMarr still matches it.
+      # SABnzbd keeps an undefined one verbatim and ROMarrNG still matches it.
       # Define it there anyway if you want its own folder or a post-processing
       # script, or point this at a built-in like "software". When you do create
-      # one in SABnzbd, the indexer category ROMarr searches under is 'console'.
+      # one in SABnzbd, the indexer category ROMarrNG searches under is 'console'.
       # SABNZBD_CATEGORY: romarr
       # QBITTORRENT_CATEGORY: romarr
       # NZBGET_CATEGORY: romarr
 
       # Optional request front-end, shown and pinged on the System page. This
       # is NOT the request-delivery setting. In GG Requestz's own container set
-      # REQUEST_WEBHOOK_URL to the value built on ROMarr's System page, e.g.:
+      # REQUEST_WEBHOOK_URL to the value built on ROMarrNG's System page, e.g.:
       # http://romarr:6868/api/v1/webhook/ggrequestz?apikey=<ROMARR_API_KEY>
       # GGREQUESTZ_URL: http://ggrequestz:3000
 
-      # Optional headless RetroArch stream server. ROMarr only ever reads from
+      # Optional headless RetroArch stream server. ROMarrNG only ever reads from
       # it -- one GET asking which platforms it can play -- and uses the answer
       # to report PS2, GameCube, Wii, Dreamcast and 3DS as playable instead of
       # download-only. Everything works without it, minus those routes.
@@ -148,7 +148,7 @@ services:
       # Your download client's completed directory.
       #
       # Left side is the host. The RIGHT side must be the path your download
-      # client reports, character for character -- ROMarr asks the client where
+      # client reports, character for character -- ROMarrNG asks the client where
       # a finished download is and then opens that path itself, so the two have
       # to agree. The host side only has to be the directory actually holding
       # those files; it does not have to resemble the container path.
@@ -166,7 +166,7 @@ services:
       #
       # Not sure what your client reports? qBittorrent shows it as "Save path"
       # in Options -> Downloads; SABnzbd as "Completed Download Folder" in
-      # Config -> Folders. ROMarr uses whatever the client's API returns, which
+      # Config -> Folders. ROMarrNG uses whatever the client's API returns, which
       # is that setting.
       #
       # When the paths genuinely cannot be made to match, leave this as-is and
@@ -174,7 +174,7 @@ services:
       # client's prefix into a local one.
       - ${ROMARR_DOWNLOADS:?set ROMARR_DOWNLOADS to your download client's completed directory on the host, e.g. ROMARR_DOWNLOADS=/mnt/downloads}:/downloads
 
-# The two ROMARR_* names above are read by compose, not by ROMarr. Put them in
+# The two ROMARR_* names above are read by compose, not by ROMarrNG. Put them in
 # a `.env` file beside this one and `docker compose up -d` needs no arguments:
 #
 #     ROMARR_ROMS=/mnt/roms
@@ -182,5 +182,5 @@ services:
 #
 # Prefer to keep every setting there too? Delete the `environment:` block and
 # use `env_file: .env` -- compose turns those entries into real environment
-# variables, which is what ROMarr reads. .env.example in this repo is a
+# variables, which is what ROMarrNG reads. .env.example in this repo is a
 # complete one, with every variable documented.

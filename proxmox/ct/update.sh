@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Update an existing ROMarr install, in place.
+# Update an existing ROMarrNG install, in place.
 #
 # Run inside the container:
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/snapetech/ROMarrNG/main/proxmox/ct/update.sh)"
@@ -27,7 +27,7 @@ version_at() {
 }
 
 [[ $EUID -eq 0 ]] || die "Run as root."
-[[ -d "$ROOT" ]] || die "No ROMarr installation at ${ROOT}."
+[[ -d "$ROOT" ]] || die "No ROMarrNG installation at ${ROOT}."
 
 BEFORE=$(version_at "$ROOT")
 info "Currently installed: ${BEFORE:-unknown}"
@@ -88,7 +88,7 @@ rm -f /tmp/romarr-update.tar.gz
 if [[ ! -f "${STAGE}/romarr/auth.py" ]]; then
   rm -rf "$STAGE"
   die "The ${SOURCE} of ${REPO} has no romarr/auth.py -- it predates
-   authentication, and installing it would leave this ROMarr answering
+   authentication, and installing it would leave this ROMarrNG answering
    anyone who reaches the port. Nothing was changed."
 fi
 
@@ -101,8 +101,8 @@ fi
 
 # Only now. Every check above can fail, and each one used to happen after the
 # service had already been stopped -- so a download that 404'd or an archive
-# that would not unpack left ROMarr down for a reason that had nothing to do
-# with ROMarr.
+# that would not unpack left ROMarrNG down for a reason that had nothing to do
+# with ROMarrNG.
 systemctl stop romarr 2>/dev/null || true
 
 # The package directory is replaced, not merged. `cp -a` over the top leaves
@@ -128,7 +128,7 @@ systemctl start romarr
 PORT=$(grep -oP '(?<=^ROMARR_PORT=)\d+' "${ROOT}/.env" 2>/dev/null || echo 6868)
 for _ in $(seq 1 20); do
   if curl -fsS -o /dev/null "http://127.0.0.1:${PORT}/api/health" 2>/dev/null; then
-    msg "ROMarr ${AFTER:-unknown} is up on port ${PORT} (was ${BEFORE:-unknown})"
+    msg "ROMarrNG ${AFTER:-unknown} is up on port ${PORT} (was ${BEFORE:-unknown})"
     echo
     echo " Rolled forward. The previous build is in ${BACKUP} if you want it"
     echo " back; delete that directory once you are happy."
@@ -147,7 +147,7 @@ if [[ -d "${BACKUP}/romarr" ]]; then
   systemctl start romarr
   for _ in $(seq 1 20); do
     if curl -fsS -o /dev/null "http://127.0.0.1:${PORT}/api/health" 2>/dev/null; then
-      die "Update failed and was rolled back. ROMarr ${BEFORE:-unknown} is
+      die "Update failed and was rolled back. ROMarrNG ${BEFORE:-unknown} is
    running again. The build that would not start is not kept -- fetch it
    again once the cause is known.
    Look at:  journalctl -u romarr -n 50 --no-pager"
@@ -156,6 +156,6 @@ if [[ -d "${BACKUP}/romarr" ]]; then
   done
 fi
 
-die "ROMarr did not come back up, and the rollback did not either. State is
+die "ROMarrNG did not come back up, and the rollback did not either. State is
    in ${BACKUP} -- romarr.json and .env there are intact.
    Look at:  journalctl -u romarr -n 50 --no-pager"
