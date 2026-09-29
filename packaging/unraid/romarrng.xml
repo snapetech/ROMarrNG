@@ -6,7 +6,7 @@
   <Network>bridge</Network>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Icon>https://raw.githubusercontent.com/snapetech/ROMarrNG/main/packaging/unraid/icon.png?version=0.10.0</Icon>
+  <Icon>https://raw.githubusercontent.com/snapetech/ROMarrNG/main/packaging/unraid/icon.png?version=0.11.1</Icon>
   <WebUI>http://[IP]:[PORT:6868]/</WebUI>
   <Overview>Standalone NG fork of ROMarr for retro and recent-console discovery and acquisition, with optional SeerrNG integration.</Overview>
   <Description>ROMarrNG is a complete standalone ROM manager; SeerrNG is optional. This Snapetech NG fork includes SeerrNG request and library APIs. The default folder library uses the mapped /roms path and needs no separate library server. Open ROMarrNG to set its password, indexers, and download client, then configure its API key in SeerrNG if desired.</Description>
@@ -16,7 +16,7 @@
   <ReadMe>https://github.com/snapetech/ROMarrNG/blob/main/README.md</ReadMe>
   <Category>MediaApp:Other</Category>
   <ExtraSearchTerms>romarrng romarr rom emulation game seerrng ps4 ps5 vita xbox</ExtraSearchTerms>
-  <Changes>Recent-console packages and complete folder dumps, with streamed archive downloads and optional SeerrNG integration. The Community Apps template now includes a ROMarrNG icon. Acquisition support does not establish emulator compatibility.</Changes>
+  <Changes>Recent-console packages and complete folder dumps, with streamed archive downloads and optional SeerrNG integration. The Community Apps template refreshes its ROMarrNG icon. Acquisition support does not establish emulator compatibility.</Changes>
   <Requires>Docker and persistent appdata. Configure this app independently before connecting it to SeerrNG.</Requires>
   <ExtraParams>--restart=unless-stopped</ExtraParams>
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.11.1] - 2026-09-29
+
+The Unraid Community Applications template now uses the ROMarrNG 0.11.1 icon
+cache version, allowing an older blank icon response to refresh.
+
 ## [0.11.0] - 2026-09-29
 
 ROMarrNG's SeerrNG catalog endpoint can return the exact day-precision release
