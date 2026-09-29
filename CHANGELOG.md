@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0] - 2026-09-29
+
+ROMarrNG's SeerrNG catalog endpoint can return the exact day-precision release
+date for a requested IGDB platform. When IGDB has no complete date for that
+platform, the endpoint returns `null` instead of using the game's global first
+release date. Malformed and out-of-range platform IDs are rejected.
+
 ## [0.10.1] - 2026-09-28
 
 This maintenance release republishes the verified ROMarrNG 0.10.0 codebase
