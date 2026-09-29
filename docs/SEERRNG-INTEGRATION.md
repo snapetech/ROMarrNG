@@ -43,12 +43,13 @@ developers, screenshots, and videos.
 | `GET /api/v1/integration/catalog/search-page` | Same as search, plus `cursor` (default `0`) | `{ results, nextCursor }`; cursor is the next IGDB offset or `null` |
 | `GET /api/v1/integration/catalog/popular` | `limit` 1–50, default 20; optional `offset` (0–10000), `platformIds`, `genre`, `releaseYear` | Popular result array |
 | `GET /api/v1/integration/catalog/popular-page` | Same as popular | `{ results, nextOffset }`; next offset is a number or `null` |
-| `GET /api/v1/integration/catalog/games/{igdbId}` | Positive numeric IGDB ID | One catalog title; `404` if missing |
+| `GET /api/v1/integration/catalog/games/{igdbId}` | Positive numeric IGDB ID; optional positive `platformId` | One catalog title; `404` if missing. With `platformId`, includes `platformReleaseDate` for that exact platform, or `null` if IGDB has no day-precision release date |
 
 Genre filtering is case-insensitive. Release years must be between 1950 and
 2200. Search cursors and popular offsets are bounded to keep catalog requests
 finite. A failed upstream catalog request returns a generic error without
-exposing provider credentials or request details.
+exposing provider credentials or request details. Platform release dates never
+fall back to the game's global first-release date.
 
 ## Submit and read requests
 

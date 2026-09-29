@@ -11,7 +11,8 @@ import pytest
 
 from romarr.dat import Match
 from romarr.metadata import (
-    PROVIDERS, GameInfo, Metadata, clean_title, lookup_key, title_from_dat)
+    PROVIDERS, GameInfo, Metadata, clean_title, igdb_catalog_game, lookup_key,
+    title_from_dat)
 
 
 # --- the key, which is the whole idea --------------------------------------
@@ -120,6 +121,73 @@ def test_the_result_records_how_it_was_matched(monkeypatch):
     assert metadata.identify(
         verification=Match("verified", game="Chrono Trigger (USA)")).matched_by == "dat"
     assert metadata.identify(filename="Contra (USA).nes").matched_by == "filename"
+
+
+def test_catalog_game_uses_the_exact_platform_release_date(monkeypatch):
+    calls = []
+
+    def query(cfg, endpoint, body, *, strict=False):
+        calls.append((endpoint, body, strict))
+        assert endpoint == "multiquery"
+        return [
+            {"name": "SeerrNG Game", "result": [{
+                "id": 42,
+                "name": "Ported Game",
+                "first_release_date": 1_735_689_600,
+                "platforms": [{"id": 48, "name": "PlayStation 4"}],
+            }]},
+            {"name": "Platform Release Dates", "result": [
+                {"y": 2026, "m": 10, "d": 9,
+                 "release_region": {"region": "North America"}},
+                {"y": 2026, "m": 10, "d": 12,
+                 "release_region": {"region": "Worldwide"}},
+                {"y": 2026, "m": 10,
+                 "release_region": {"region": "Europe"}},
+            ]},
+        ]
+
+    import romarr.metadata as module
+    monkeypatch.setattr(module, "igdb_query", query)
+
+    game = igdb_catalog_game({"client_id": "id", "token": "secret"}, 42, 48)
+
+    assert game["releaseDate"] == "2025-01-01"
+    assert game["platformReleaseDate"] == "2026-10-12"
+    assert calls[0][2] is True
+    assert "game = 42 & platform = 48" in calls[0][1]
+    assert "d != null & m != null & y != null" in calls[0][1]
+
+
+def test_catalog_game_does_not_replace_missing_platform_date_with_global_date(monkeypatch):
+    import romarr.metadata as module
+
+    def query(cfg, endpoint, body, *, strict=False):
+        return [
+            {"name": "SeerrNG Game", "result": [{
+                "id": 42,
+                "name": "Undated Port",
+                "first_release_date": 1_735_689_600,
+            }]},
+            {"name": "Platform Release Dates", "result": []},
+        ]
+
+    monkeypatch.setattr(module, "igdb_query", query)
+
+    game = igdb_catalog_game({"client_id": "id", "token": "secret"}, 42, 167)
+
+    assert game["releaseDate"] == "2025-01-01"
+    assert game["platformReleaseDate"] is None
+
+
+@pytest.mark.parametrize("row", [
+    {"y": True, "m": 10, "d": 9},
+    {"y": 2026.5, "m": 10, "d": 9},
+    {"y": 2026, "m": 2, "d": 30},
+])
+def test_platform_release_dates_require_valid_integer_calendar_days(row):
+    from romarr.metadata import _exact_platform_release_date
+
+    assert _exact_platform_release_date(row) is None
 
 
 def test_providers_are_tried_in_order_until_one_answers(monkeypatch):

@@ -4655,6 +4655,18 @@ class ROMarr:
 
 # -- HTTP ------------------------------------------------------------------
 
+def _parse_igdb_platform_id(values: list[str] | None) -> int | None:
+    """Parse the optional catalog platform filter with the provider contract's bound."""
+    if not values:
+        return None
+    if len(values) != 1 or not re.fullmatch(r"[1-9][0-9]{0,6}", values[0]):
+        raise ValueError("invalid IGDB platform ID")
+    platform_id = int(values[0])
+    if platform_id > 1_000_000:
+        raise ValueError("invalid IGDB platform ID")
+    return platform_id
+
+
 def make_handler(service: ROMarr):
     class Handler(BaseHTTPRequestHandler):
         server_version = "ROMarr"
@@ -4930,7 +4942,11 @@ def make_handler(service: ROMarr):
                     if not re.fullmatch(r"[1-9][0-9]{0,9}", raw_id):
                         return self._json(400, {"error": "invalid catalog ID"})
                     try:
-                        game = igdb_catalog_game(cfg, int(raw_id))
+                        platform_id = _parse_igdb_platform_id(query.get("platformId"))
+                    except ValueError:
+                        return self._json(400, {"error": "invalid IGDB platform ID"})
+                    try:
+                        game = igdb_catalog_game(cfg, int(raw_id), platform_id)
                     except Exception:
                         return self._json(502, {"error": "IGDB catalog request failed"})
                     return self._json(200, game) if game else self._json(

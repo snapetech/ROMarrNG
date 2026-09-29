@@ -50,7 +50,7 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "/api/integration/seerrng/v1/catalog/search-page": ("GET", "Search IGDB with stable cursor pagination and optional platform, genre and year filters."),
     "/api/integration/seerrng/v1/catalog/popular": ("GET", "Popular IGDB titles."),
     "/api/integration/seerrng/v1/catalog/popular-page": ("GET", "Popular IGDB titles with offset pagination and optional filters."),
-    "/api/integration/seerrng/v1/catalog/games/{igdbId}": ("GET", "Read one IGDB title by its stable numeric identity."),
+    "/api/integration/seerrng/v1/catalog/games/{igdbId}": ("GET", "Read one IGDB title; an optional platformId returns its exact day-precision platform release date."),
     "/api/integration/seerrng/v1/library/lookup": ("POST", "Look up SeerrNG emulation requests against the local ROM library."),
     "/api/integration/seerrng/v1/requests": ("POST", "Idempotently create a SeerrNG emulation request with its IGDB game and platform identity."),
     "/api/integration/seerrng/v1/requests/{externalRequestId}": ("GET", "Read request status, stable catalog identity and available actions."),
@@ -67,7 +67,8 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "/api/v1/integration/catalog/popular-page": ("GET", "Page through popular "
                                                             "IGDB games."),
     "/api/v1/integration/catalog/games/{igdbId}": ("GET", "Read one IGDB game "
-                                                                  "with platform and media details."),
+                                                                  "with platform and media details; optional platformId returns an exact "
+                                                                  "day-precision platform release date."),
     "/api/v1/integration/library/lookup": ("POST", "Bounded title and platform "
                                              "lookup against the cached ROM library. "
                                              "Returns readiness, partial-cache state, "

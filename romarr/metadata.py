@@ -538,13 +538,62 @@ def igdb_catalog_popular_page(cfg: dict, offset: int,
     return output, next_offset
 
 
-def igdb_catalog_game(cfg: dict, igdb_id: int) -> dict | None:
-    rows = igdb_query(
-        cfg, "games",
+def _exact_platform_release_date(row: dict) -> tuple[str, str] | None:
+    """Return one fully specified IGDB date and its region label, if present."""
+    year, month, day = row.get("y"), row.get("m"), row.get("d")
+    if any(not isinstance(value, int) or isinstance(value, bool)
+           for value in (year, month, day)):
+        return None
+    try:
+        released = datetime.date(year, month, day)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    region = row.get("release_region")
+    region_name = (str(region.get("region") or "")
+                   if isinstance(region, dict) else "")
+    return released.isoformat(), region_name.casefold()
+
+
+def igdb_catalog_game(cfg: dict, igdb_id: int,
+                      platform_id: int | None = None) -> dict | None:
+    if platform_id is None:
+        rows = igdb_query(
+            cfg, "games",
+            f"{IGDB_CATALOG_DETAIL_FIELDS} where id = {int(igdb_id)} "
+            f"& {IGDB_MAIN_GAMES}; limit 1;", strict=True,
+        )
+        return igdb_catalog_row(rows[0]) if rows else None
+
+    if (not isinstance(platform_id, int) or isinstance(platform_id, bool)
+            or not 1 <= platform_id <= 1_000_000):
+        raise ValueError("invalid IGDB platform ID")
+
+    query = (
+        'query games "SeerrNG Game" {'
         f"{IGDB_CATALOG_DETAIL_FIELDS} where id = {int(igdb_id)} "
-        f"& {IGDB_MAIN_GAMES}; limit 1;", strict=True,
-    )
-    return igdb_catalog_row(rows[0]) if rows else None
+        f"& {IGDB_MAIN_GAMES}; limit 1;"
+        '}; query release_dates "Platform Release Dates" {'
+        "fields d,m,y,release_region.region; "
+        f"where game = {int(igdb_id)} & platform = {platform_id} "
+        "& d != null & m != null & y != null; "
+        "sort date asc; limit 100; };")
+    results = igdb_query(cfg, "multiquery", query, strict=True)
+    game_rows = next((item.get("result") for item in results
+                      if item.get("name") == "SeerrNG Game"
+                      and isinstance(item.get("result"), list)), [])
+    release_rows = next((item.get("result") for item in results
+                         if item.get("name") == "Platform Release Dates"
+                         and isinstance(item.get("result"), list)), [])
+    if not game_rows:
+        return None
+
+    game = igdb_catalog_row(game_rows[0])
+    dated = [parsed for row in release_rows if isinstance(row, dict)
+             and (parsed := _exact_platform_release_date(row))]
+    dated.sort(key=lambda item: item[0])
+    worldwide = next((item[0] for item in dated if item[1] == "worldwide"), None)
+    game["platformReleaseDate"] = worldwide or (dated[0][0] if dated else None)
+    return game
 
 
 def _igdb(cfg: dict, term: str) -> GameInfo:
