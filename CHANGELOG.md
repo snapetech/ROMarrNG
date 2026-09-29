@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.10.1] - 2026-09-28
+
+This maintenance release republishes the verified ROMarrNG 0.10.0 codebase
+with a new versioned image. It includes no application behavior changes.
+
 ## [0.10.0] - 2026-09-28
 
 First GitHub Release for the existing ROMarrNG tag history through `v0.9.0`.
