@@ -562,7 +562,7 @@ def _set_name(primary: str) -> str:
     return Path(primary.replace("\\", "/")).stem
 
 
-def map_remote_path(path, mappings):
+def map_remote_path(path, mappings, client_id=None):
     """Translate a download client's path into one this process can open.
 
     The client reports paths in ITS filesystem. When it runs in a different
@@ -570,22 +570,30 @@ def map_remote_path(path, mappings):
     mounted at all, which is a mount problem a mapping cannot paper over, and
     the caller finds that out because the translated path still does not exist.
 
-    The longest matching prefix wins, so a specific mapping can override a
-    broader one rather than depending on which was added first.
+    A mapping with a download-client id applies only to that configured
+    client. Client-specific mappings take precedence over shared mappings;
+    within either scope the longest matching prefix wins. Entries without an
+    id remain shared, preserving existing settings.
     """
     text = str(path)
     best = None
     for entry in mappings or []:
+        if not isinstance(entry, dict):
+            continue
+        mapped_client = str(entry.get("client_id") or "")
+        if mapped_client and mapped_client != str(client_id or ""):
+            continue
         remote = str(entry.get("remote", "")).rstrip("/\\")
         local = str(entry.get("local", "")).rstrip("/\\")
         if not remote or not local:
             continue
         if text == remote or text.startswith(remote + "/") or text.startswith(remote + "\\"):
-            if best is None or len(remote) > len(best[0]):
-                best = (remote, local)
+            priority = (bool(mapped_client), len(remote))
+            if best is None or priority > best[0]:
+                best = (priority, remote, local)
     if best is None:
         return _checked(Path(text), text, mapped=False)
-    remote, local = best
+    _, remote, local = best
     rest = text[len(remote):].lstrip("/\\")
     return _checked(Path(local) / rest if rest else Path(local), text, mapped=True)
 

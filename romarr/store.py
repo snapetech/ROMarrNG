@@ -202,7 +202,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # import fails with "download path does not exist" while the file is
     # sitting right there.
     #
-    # Each entry is {"remote": "<what the client says>", "local": "<what we see>"}.
+    # Each entry is {"remote": "<what the client says>",
+    # "local": "<what we see>"}. Optional client_id scopes a rule to one
+    # configured download client; entries without it stay shared for existing
+    # installs and paths common to several clients.
     "remote_path_mappings": [],
     # Import lists: titles fed into Wanted on the List Sync schedule. Each
     # entry keeps a ledger of what it already added, so a list re-syncing

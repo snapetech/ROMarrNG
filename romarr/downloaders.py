@@ -2702,11 +2702,10 @@ class SiteDownloader:
         self._forbidden: set[str] = set()
         #: What reachable() last found out, for the status page.
         self.detail = ""
-        #: The estate's remote path mappings, needed to find a file an
-        #: `http://` browser wrote on another host. Set after construction
-        #: rather than carried on the config because the table is a property
-        #: of the install, not of this client row -- the same list already
-        #: translates every other client's completed paths.
+        #: The install's remote path mappings, needed to find a file an
+        #: `http://` browser wrote on another host. The list can include both
+        #: shared entries and entries scoped to this client's config id; the
+        #: app supplies it after construction so edits take effect live.
         self.path_mappings: list | tuple = ()
 
     # -- identity ----------------------------------------------------------
@@ -2918,6 +2917,7 @@ class SiteDownloader:
             timeout=self._config.timeout,
             remote_dir=self._config.remote_download_dir,
             path_mappings=self.path_mappings,
+            client_id=getattr(self, "config_id", ""),
             # Checked again where it lands. `allowed` above cleared the page;
             # a click routinely crosses to a file host with its own robots.txt.
             allowed=self._policy.allowed,

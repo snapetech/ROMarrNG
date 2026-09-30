@@ -151,16 +151,23 @@ the client's API returns, which is that setting.
 
 If the two genuinely cannot be made to match — a client on another machine —
 leave the mount alone and add a **remote path mapping** under *Settings → Media
-Management*:
+Management*. Select the download client when its path differs from other
+clients; leave it set to *All download clients* for a path shared by several.
+This is useful when SABnzbd and a torrent client report the same remote path but
+ROMarr sees their files in different local directories. For example:
 
 ```json
 "remote_path_mappings": [
-  { "remote": "/downloads", "local": "/mnt/downloads" }
+  { "remote": "/downloads", "local": "/mnt/torrents" },
+  { "client_id": "<sabnzbd-client-id>", "remote": "/downloads", "local": "/mnt/usenet" }
 ]
 ```
 
-Longest matching prefix wins, and the log records both the path the client
-reported and what ROMarr resolved it to.
+Mappings without `client_id` apply to all download clients. A client-specific
+mapping takes precedence over a shared mapping; the longest matching path prefix
+wins within either scope. Use the Settings page's client selector rather than
+editing the id by hand.
+The log records both the path the client reported and what ROMarr resolved it to.
 
 ### PUID / PGID / UMASK
 

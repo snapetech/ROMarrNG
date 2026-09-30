@@ -896,7 +896,7 @@ The full list, including every way an install can fail to start, is in
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| "Download path does not exist" | The client reports a path ROMarr cannot see | Match the container-side download path, or set a mapping under Settings → Media Management |
+| "Download path does not exist" | The client reports a path ROMarr cannot see | Match the container-side download path, or add a shared or client-specific mapping under Settings → Media Management |
 | Results found then refused | No download client for that protocol | Add a client for torrent and/or usenet — the Download Clients page names the gap |
 | Any environment change has no effect | The environment seeds on first run only; the Settings page is the authority after that | Change it on the Settings page |
 | Container exits 1 with "romarr.json exists but cannot be read" | The state file is owned by a user the container does not run as | `chown -R` your PUID:PGID on the directory mounted at `/config` — do not delete the file |
@@ -910,12 +910,17 @@ The full list, including every way an install can fail to start, is in
 
 ```json
 "remote_path_mappings": [
-  { "remote": "/downloads", "local": "/mnt/downloads" }
+  { "remote": "/downloads", "local": "/mnt/downloads" },
+  { "client_id": "<download-client-id>", "remote": "/complete", "local": "/mnt/sab-complete" }
 ]
 ```
 
-Longest matching prefix wins. The log records both the path the client reported and
-what ROMarr resolved it to.
+Mappings without `client_id` apply to every client, preserving existing settings.
+The Settings page lets you select a configured client for a client-specific rule;
+this lets SABnzbd and torrent clients use different local paths even when they
+report the same remote path. Client-specific rules take precedence over shared
+rules, and the longest matching prefix wins within each scope. The log records
+both the reported path and the resolved path.
 
 ---
 

@@ -2451,13 +2451,16 @@ function settingsPage(title, help, body, after){
     document.querySelectorAll('[data-k]').forEach(el=>{
       patch[el.dataset.k]= el.type==='checkbox' ? el.checked
         : el.type==='number' ? Number(el.value)
-        : el.dataset.mappings ? el.value.split('\n').map(line=>{
-            const [remote,local]=line.split('=').map(x=>(x||'').trim());
-            return remote&&local?{remote,local}:null;
-          }).filter(Boolean)
         : el.dataset.list ? el.value.split(',').map(s=>s.trim()).filter(Boolean)
         : el.value;
     });
+    const mappings=$('#remote-path-mappings');
+    if(mappings) patch.remote_path_mappings=[...mappings.querySelectorAll('[data-mapping-row]')]
+      .map(row=>({
+        client_id:row.querySelector('[data-map-client]').value,
+        remote:row.querySelector('[data-map-remote]').value.trim(),
+        local:row.querySelector('[data-map-local]').value.trim(),
+      })).filter(m=>m.remote&&m.local);
     SETTINGS=await j('/api/v1/config',{method:'PUT',
       headers:{'content-type':'application/json'},body:JSON.stringify(patch)});
     toast('Saved');
@@ -2473,18 +2476,35 @@ const sel=(k,label,options,val,help='')=>`<div class="field"><label>${label}</la
     `<option value="${v}"${String(val)===v?' selected':''}>${t}</option>`).join('')}</select>
   ${help?`<div style="color:var(--dim);font-size:11.5px;margin-top:4px">${help}</div>`:''}</div>`;
 
-const mapLines=m=>(m||[]).map(x=>(x.remote||'')+' = '+(x.local||'')).join('\n');
+const pathMappingRow=m=>{
+  m=m||{};
+  const clientId=m.client_id==null?'':String(m.client_id);
+  const clients=SETTINGS.download_clients||[];
+  const options=[['','All download clients'],...clients.map(c=>[
+    String(c.id||''),`${c.name||c.type||'Download client'} · ${c.type||'client'} · ${c.host||'local'}${c.port?':'+c.port:''}`])];
+  if(clientId&&!clients.some(c=>String(c.id||'')===clientId))
+    options.push([clientId,`Unavailable download client · ${clientId}`]);
+  return `<div data-mapping-row style="display:grid;grid-template-columns:minmax(160px,1fr) minmax(160px,1fr) minmax(160px,1fr) auto;gap:8px;margin:8px 0">
+    <select data-map-client aria-label="Download client">${options.map(([value,label])=>
+      `<option value="${esc(value)}"${value===clientId?' selected':''}>${esc(label)}</option>`).join('')}</select>
+    <input data-map-remote aria-label="Remote path" value="${esc(m.remote||'')}" placeholder="Path reported by client">
+    <input data-map-local aria-label="Local path" value="${esc(m.local||'')}" placeholder="Path visible to ROMarr">
+    <button type="button" data-mapping-remove aria-label="Remove mapping">Remove</button>
+  </div>`;
+};
+const pathMappingRows=m=>(Array.isArray(m)&&m.length?m:[{}]).map(pathMappingRow).join('');
 RENDER.media=()=>settingsPage('Media Management',
   'Where imported ROMs are filed. This must be the same path your library server scans.',
   fld('library_path','ROM library root',SETTINGS.library_path)
   +fld('dat_path','DAT directory',SETTINGS.dat_path||'')
   +`<div class="field"><label>Remote path mappings</label>
-     <textarea data-k="remote_path_mappings" data-mappings="1" rows="3"
-       style="width:100%;resize:vertical;font:12px/1.5 ui-monospace,Menlo,monospace"
-       placeholder="/downloads = /mnt/downloads">${esc(mapLines(SETTINGS.remote_path_mappings))}</textarea>
-     <div style="color:var(--dim);font-size:11.5px;margin-top:4px">
-       One per line: what the download client says = what ROMarr sees.
-       Longest matching prefix wins.</div></div>`
+     <div style="color:var(--dim);font-size:11.5px;margin:4px 0 8px">
+       Map the path a download client reports to the path ROMarr can see. Choose
+       a client to keep SABnzbd and torrent paths separate, or use All download
+       clients for a shared path. Client-specific mappings take precedence;
+       within a scope, the longest matching prefix wins.</div>
+     <div id="remote-path-mappings">${pathMappingRows(SETTINGS.remote_path_mappings)}</div>
+     <button class="btn ghost" id="remote-path-mapping-add" type="button">Add mapping</button></div>`
   +sel('library_layout','Folder structure',
      [['flat','Structure A — platform/rom'],['nested','Structure B — platform/roms/rom']],
      SETTINGS.library_layout||'flat',
@@ -2503,7 +2523,15 @@ RENDER.media=()=>settingsPage('Media Management',
      'What Collections does with an English fan translation. The Digimon-only-'
      +'in-Japan case: "Fill" downloads the translation instead of leaving the '
      +'game Japanese-only; "Keep both" files it under Translations/ so your '
-     +'library shows it as a variant.'));
+     +'library shows it as a variant.'),
+  ()=>{
+    const rows=$('#remote-path-mappings');
+    $('#remote-path-mapping-add').onclick=()=>rows.insertAdjacentHTML('beforeend',pathMappingRow({}));
+    rows.onclick=e=>{
+      const remove=e.target.closest('[data-mapping-remove]');
+      if(remove)remove.closest('[data-mapping-row]').remove();
+    };
+  });
 
 RENDER.profiles=()=>settingsPage('Release Profile',
   'A quality profile means nothing for a cartridge dump — there is no bitrate. '

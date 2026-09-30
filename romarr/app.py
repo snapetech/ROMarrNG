@@ -1345,16 +1345,9 @@ class ROMarr:
                 continue
             client = build_client(cfg)
             if client is not None:
-                # A client that has to READ a file another host wrote needs
-                # the translation table, and the table belongs to the install
-                # rather than to any one client row -- so it is handed over
-                # here, where both are in scope, instead of being duplicated
-                # into every configuration that might need it.
-                if hasattr(client, "path_mappings"):
-                    client.path_mappings = (
-                        self.store.settings.get("remote_path_mappings") or [])
                 clients.append(client)
         self.clients = clients
+        self._apply_remote_path_mappings()
 
         # The first enabled Prowlarr entry drives search.
         for cfg in self.store.list_items("indexers"):
@@ -1375,6 +1368,18 @@ class ROMarr:
             if indexer is not None:
                 direct.append(indexer)
         self.indexers = direct
+
+    def _apply_remote_path_mappings(self) -> None:
+        """Give browser clients the current shared and client-scoped rules.
+
+        Browser downloads can land on a separate host and need the mapping
+        while fetching the file. Keep this in sync when Media Management is
+        saved, without rebuilding live clients.
+        """
+        mappings = self.store.settings.get("remote_path_mappings") or []
+        for client in self.clients:
+            if hasattr(client, "path_mappings"):
+                client.path_mappings = mappings
 
     def safe_settings(self) -> dict:
         """Settings with every stored credential masked.
@@ -4536,16 +4541,18 @@ class ROMarr:
                         item.state = "grabbed"
             self.store.save()
         results = []
-        finished = []
+        finished: list[tuple[dict, str]] = []
         for client in self.clients:
             if not getattr(client, "configured", True):
                 continue
             try:
-                finished.extend(client.completed())
+                client_id = str(getattr(client, "config_id", "") or "")
+                finished.extend((item, client_id)
+                                for item in client.completed())
             except Exception as err:
                 # One unreachable client must not stop the others importing.
                 log.warning("%s completed() failed: %s", getattr(client, "name", client), err)
-        for torrent in finished:
+        for torrent, client_id in finished:
             name = torrent.get("name", "")
             # The client reports the path IT sees. When it runs in a different
             # container that path means nothing here, and the import fails with
@@ -4553,6 +4560,7 @@ class ROMarr:
             path = map_remote_path(
                 torrent.get("content_path") or torrent.get("save_path", ""),
                 self.store.settings.get("remote_path_mappings"),
+                client_id=client_id,
             )
             platform = None
             queue_item = None
@@ -6424,6 +6432,8 @@ def make_handler(service: ROMarr):
 
             if route.path == "/api/v1/config":
                 updated = service.store.update_settings(body)
+                if "remote_path_mappings" in body:
+                    service._apply_remote_path_mappings()
                 if "dat_path" in body:
                     # A stored path nothing re-reads is a setting that lies;
                     # reload_dats both stores and applies it.

@@ -282,7 +282,7 @@ def declared_user_agent(browser, token: str) -> str | None:
 
 def fetch(page_url: str, destination: Path, *, control: str = "",
           endpoint: str = "", ua_token: str = "", timeout: int = 120,
-          remote_dir: str = "", path_mappings=(),
+          remote_dir: str = "", path_mappings=(), client_id: str = "",
           allowed=None) -> Path:  # noqa: C901
     """Open the page, click the real control, keep what the browser downloads.
 
@@ -333,14 +333,16 @@ def fetch(page_url: str, destination: Path, *, control: str = "",
                     raise Refused(
                         f"the page was ours to open but the download comes "
                         f"from {landed or 'another host'}, which is not: {why}")
-            saved = _keep(download, destination, remote_dir, path_mappings)
+            saved = _keep(download, destination, remote_dir, path_mappings,
+                          client_id=client_id)
             context.close()
             return saved
         finally:
             browser.close()
 
 
-def _keep(download, destination: Path, remote_dir: str, path_mappings) -> Path:
+def _keep(download, destination: Path, remote_dir: str, path_mappings, *,
+          client_id: str = "") -> Path:
     """Put the downloaded file where ROMarr can import it.
 
     `save_as` covers two of the three shapes in _open: a local launch, where
@@ -374,7 +376,8 @@ def _keep(download, destination: Path, remote_dir: str, path_mappings) -> Path:
         reported = download.path()
     except Exception:
         reported = os.path.join(remote_dir, name)
-    local = map_remote_path(str(reported), path_mappings)
+    local = map_remote_path(str(reported), path_mappings,
+                            client_id=client_id)
     if not Path(local).exists():
         raise Unavailable(
             f"the browser reported {reported}, which does not exist here -- "
