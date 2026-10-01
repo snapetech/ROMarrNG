@@ -10,6 +10,7 @@ about 94,428 rows with no file behind them at all.
 from __future__ import annotations
 
 import pytest
+from urllib.parse import urlsplit
 
 from romarr import playability
 from romarr.app import ROMarr
@@ -181,7 +182,9 @@ def test_configuring_js_dos_turns_the_alternative_into_a_route():
     policy = PlayerPolicy(urls={JSDOS: "https://dos.test/"})
     got = routes_for_file("dune2.zip", "dos", players=policy)
     assert JSDOS in got.players
-    assert "https://dos.test" in detail(got, JSDOS)
+    endpoint = next(part for part in detail(got, JSDOS).split()
+                    if part.startswith("https://"))
+    assert urlsplit(endpoint).hostname == "dos.test"
 
 
 def test_the_operators_order_wins_over_the_tables():

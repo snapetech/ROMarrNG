@@ -347,8 +347,8 @@ def ingest(payload, *, directory: Path) -> dict:
             written[slug] = len(fresh)
             accepted += len(fresh)
 
-    log.info("capture from %s: %d indexed, %d already known, %d skipped",
-             source, accepted, duplicates, skipped)
+    log.info("capture indexed: %d new, %d already known, %d skipped",
+             accepted, duplicates, skipped)
     return {
         "ok": True,
         "source": source,

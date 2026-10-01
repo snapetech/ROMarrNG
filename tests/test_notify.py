@@ -9,6 +9,7 @@ what it weighed, because the scorer already explained itself.
 from __future__ import annotations
 
 import json
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -162,7 +163,9 @@ def test_a_webhook_url_is_not_written_to_the_log_in_full(caplog, monkeypatch):
     with caplog.at_level("WARNING"):
         notify._post("https://discord.com/api/webhooks/123/SUPERSECRETTOKEN")
     assert "SUPERSECRETTOKEN" not in caplog.text
-    assert "discord.com" in caplog.text
+    endpoint = next(part for part in caplog.text.split()
+                    if part.startswith("https://"))
+    assert urlsplit(endpoint).hostname == "discord.com"
 
 
 # --- the message other tools cannot send -----------------------------------

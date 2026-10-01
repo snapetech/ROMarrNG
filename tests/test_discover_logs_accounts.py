@@ -1,6 +1,7 @@
 """Discover, the live log ring, and the account-backed list sources."""
 
 import json
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -28,7 +29,7 @@ def test_discover_serves_a_shelf_from_rawg(monkeypatch):
     import romarr.metadata as m
 
     def fake_get(url):
-        assert "api.rawg.io" in url
+        assert urlsplit(url).hostname == "api.rawg.io"
         assert "metacritic=60%2C100" in url, "popular is metacritic-gated"
         return {"results": [{"name": "Chrono Trigger", "released": "1995-03-11",
                              "rating": 4.6, "background_image": "http://x/y.jpg",

@@ -278,6 +278,9 @@ class NZBVortex:
         # the exchange back into a replayable secret, which is the thing the
         # nonce was there to prevent.
         cnonce = secrets.token_hex(16)
+        # NZBVortex requires this exact challenge-response digest. This is not
+        # a stored-password verifier, so substituting a password KDF or HMAC
+        # would break the protocol; the random server nonce prevents replay.
         digest = hashlib.sha256(
             f"{nonce}:{cnonce}:{self._config.api_key}".encode()).digest()
         body = self._fetch("auth/login", params={

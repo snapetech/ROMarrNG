@@ -106,7 +106,7 @@ def trusted_peer(peer: str, allowed) -> bool:
             if address in ipaddress.ip_network(entry, strict=False):
                 return True
         except ValueError:
-            log.warning("ignoring unparseable trusted proxy %r", entry)
+            log.warning("ignoring unparseable trusted proxy network")
     return False
 
 

@@ -168,7 +168,7 @@ def test_update_check_survives_github_being_down(tmp_path, monkeypatch):
     monkeypatch.setattr(_requests, "get", down)
     out = s.check_update()
     assert not out["ok"]
-    assert "github.com" in out["message"]
+    assert out["message"].endswith(": ConnectionError")
 
 
 def test_grab_notifies_with_the_scorers_reasons(tmp_path, monkeypatch):

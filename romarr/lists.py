@@ -29,6 +29,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from urllib.parse import quote, urlsplit
 
 log = logging.getLogger(__name__)
 
@@ -432,14 +433,37 @@ def _steam_public_entries(cfg: dict, http) -> list[ListEntry]:
     handle = str(cfg.get("profile") or cfg.get("steam_id") or "").strip()
     if not handle:
         return []
-    # Accept a full profile URL, a bare vanity name, or a 64-bit id.
-    handle = handle.rstrip("/")
-    if "steamcommunity.com" in handle:
-        base = handle
-    elif handle.isdigit():
-        base = f"{STEAM_COMMUNITY}/profiles/{handle}"
+    # Accept a Steam profile URL, bare vanity name, or 64-bit id. A URL is
+    # parsed and rebuilt on Steam's fixed origin so strings such as
+    # `steamcommunity.com.evil.example` can never redirect this request.
+    if "://" in handle or handle.startswith("//"):
+        try:
+            parts = urlsplit(handle)
+            port = parts.port
+        except ValueError:
+            raise ValueError("enter a valid Steam profile URL")
+        if (parts.scheme.lower() != "https"
+                or (parts.hostname or "").lower() != "steamcommunity.com"
+                or parts.username is not None or parts.password is not None
+                or port not in (None, 443)):
+            raise ValueError(
+                "Steam profile URLs must use steamcommunity.com over HTTPS")
+        profile_path = parts.path.rstrip("/")
+        route, separator, profile = profile_path.lstrip("/").partition("/")
+        if (not separator or route not in ("id", "profiles") or not profile
+                or "/" in profile or profile in (".", "..")):
+            raise ValueError("enter a Steam /id/<name> or /profiles/<id> URL")
+        if route == "profiles" and not profile.isdecimal():
+            raise ValueError("Steam profile IDs must be numeric")
+        base = f"{STEAM_COMMUNITY}/{route}/{quote(profile, safe='')}"
     else:
-        base = f"{STEAM_COMMUNITY}/id/{handle}"
+        if any(char in handle for char in "/\\?#@:") or any(
+                char.isspace() for char in handle):
+            raise ValueError("enter a Steam profile URL, vanity name, or ID")
+        if handle.isdecimal():
+            base = f"{STEAM_COMMUNITY}/profiles/{quote(handle, safe='')}"
+        else:
+            base = f"{STEAM_COMMUNITY}/id/{quote(handle, safe='')}"
     response = http.get(f"{base}/games?tab=all&xml=1", timeout=30,
                         allow_redirects=False)
     location = str(getattr(response, "headers", {}).get("Location") or "")
@@ -835,4 +859,3 @@ NO_API_STORES = {
                 "Genuinely paste-only — and the one where DAT-verified "
                 "acquisition matters most anyway.",
 }
-

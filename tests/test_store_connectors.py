@@ -1,6 +1,7 @@
 """Epic, EA and Battle.net: owned libraries, the way Playnite gets them."""
 
 import json
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -136,7 +137,7 @@ def test_battlenet_reads_the_json_the_account_page_shows():
 def test_battlenet_can_fetch_with_a_session_cookie_instead():
     class FakeBnet:
         def get(self, url, headers=None, timeout=None):
-            assert "account.blizzard.com" in url
+            assert urlsplit(url).hostname == "account.blizzard.com"
             assert headers["Cookie"] == "SESSION=x"
             return R(BNET)
 

@@ -1,5 +1,7 @@
 """One-click connect: Steam OpenID, and the token-page shortcuts."""
 
+from urllib.parse import parse_qs, urlsplit
+
 import pytest
 
 from romarr.connect import (TOKEN_SOURCES, new_state, steam_login_url,
@@ -14,7 +16,8 @@ def test_the_login_url_asks_steam_to_identify_the_signed_in_user():
     # identifier_select is what makes it one click rather than a login form.
     assert "identifier_select" in url
     assert "checkid_setup" in url
-    assert "romarr.example.com" in url
+    return_to = parse_qs(urlsplit(url).query)["openid.return_to"][0]
+    assert return_to == RETURN
 
 
 class FakeSteam:

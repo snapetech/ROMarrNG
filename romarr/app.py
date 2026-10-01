@@ -123,17 +123,48 @@ DEFAULT_CATEGORY = "romarr"
 
 def redact_query_credentials(value: str) -> str:
     """Hide URL credentials while preserving a useful HTTP log line."""
-    def redact(match: re.Match) -> str:
-        marker, name, _ = match.groups()
-        if unquote_plus(name).casefold() == "apikey":
-            return f"{marker}{name}=[REDACTED]"
-        return match.group(0)
+    # Request targets are attacker-controlled. Keep this parser linear in their
+    # length instead of applying a backtracking expression to the whole value.
+    # Remove line breaks first so a crafted target cannot forge another log
+    # entry; the server's useful path and query text is otherwise preserved.
+    text = str(value).replace("\r", " ").replace("\n", " ")
+    output: list[str] = []
+    position = 0
+    while position < len(text):
+        if text[position] not in "?&":
+            start = position
+            while position < len(text) and text[position] not in "?&":
+                position += 1
+            output.append(text[start:position])
+            continue
 
-    # Decode the parameter *name* for the decision, because parse_qs does too:
-    # `api%6bey=` authenticates and therefore has to be redacted just as the
-    # ordinary spelling is. Leave every non-credential parameter byte-for-byte
-    # intact so the access log remains useful.
-    return re.sub(r"([?&])([^=&\s\"]+)=([^&\s\"]*)", redact, str(value))
+        marker = position
+        name_start = marker + 1
+        equals = name_start
+        while (equals < len(text) and text[equals] not in "?&=\""
+               and not text[equals].isspace()):
+            equals += 1
+        if equals == len(text) or text[equals] != "=":
+            output.append(text[marker])
+            position += 1
+            continue
+
+        name = text[name_start:equals]
+        redact = unquote_plus(name).casefold() == "apikey"
+        end = equals + 1
+        delimiters = "&\"" if redact else "?&\""
+        while (end < len(text) and text[end] not in delimiters
+               and not text[end].isspace()):
+            end += 1
+        if redact:
+            output.append(f"{text[marker]}{name}=[REDACTED]")
+        else:
+            output.append(text[marker:end])
+        position = end
+
+    # Decode parameter names just as parse_qs does, so `api%6bey=` is hidden
+    # too. Ordinary parameters remain byte-for-byte intact.
+    return "".join(output)
 
 
 def category_for(env: dict[str, str], client: str) -> str:

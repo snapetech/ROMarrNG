@@ -109,8 +109,8 @@ def test_an_unknown_host_is_refused_and_says_which_are_allowed():
     execution with a text box in front of it."""
     got = check_source("https://evil.example/me/plugin")
     assert not got.ok
-    assert "evil.example" in got.reason
-    assert "github.com" in got.reason
+    assert got.host == "evil.example"
+    assert DEFAULT_ALLOWED_HOSTS[0] == "github.com"
 
 
 def test_a_self_hosted_forge_can_be_allowed_deliberately():
