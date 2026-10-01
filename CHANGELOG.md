@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.12.0] - 2026-10-01
+
+### Added
+
+- Remote download path mappings can target one configured download client. This
+  lets SABnzbd and torrent clients use different local paths for the same
+  reported remote path; existing mappings still apply to every client.
+
+### Changed
+
+- The Unraid Community Applications icon now displays the NG badge, with a
+  refreshed cache version.
+- Container images now use Python 3.14.
+
+### Security
+
+- Hardened Steam profile URL validation against untrusted destinations and
+  made request-target credential redaction linear while preventing log-line
+  injection. Removed attacker-controlled values from sensitive log messages.
+- Enabled Dependabot updates and dependency review automation.
+
 ## [0.11.1] - 2026-09-29
 
 The Unraid Community Applications template now uses the ROMarrNG 0.11.1 icon
