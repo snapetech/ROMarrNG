@@ -3456,8 +3456,10 @@ RENDER.getstarted=async()=>{
                 :'<span class="pill" style="background:var(--warn);color:#2a1c05">not set up</span>';
 
   const indexerOk=!!(status.prowlarr||(status.indexers||0)>0);
-  const clientOk=!!(status.qbittorrent||status.sabnzbd||status.nzbget
-                    ||(status.download_clients||0)>0);
+  // /api/v1/system/status reports configured clients in `clients`. The
+  // legacy per-client fields and `download_clients` count are not returned
+  // by that endpoint, so checking them left this step permanently unset.
+  const clientOk=(status.clients||[]).some(c=>c&&c.configured);
   const libOk=items.some(l=>l.ok);
   const datOk=(status.dats||0)>0||!!status.dat_games;
 
