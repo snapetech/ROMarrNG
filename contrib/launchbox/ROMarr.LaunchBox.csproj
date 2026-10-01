@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>ROMarr.LaunchBox</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="Unbroken.LaunchBox.Plugins">
+      <HintPath>$(LaunchBoxApiAssembly)</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="ValidateLaunchBoxApiAssembly"
+          BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="'$(LaunchBoxApiAssembly)' == ''"
+           Text="Set LaunchBoxApiAssembly to the full path of Unbroken.LaunchBox.Plugins.dll from your LaunchBox installation." />
+    <Error Condition="'$(LaunchBoxApiAssembly)' != '' and !Exists('$(LaunchBoxApiAssembly)')"
+           Text="LaunchBox API assembly not found at '$(LaunchBoxApiAssembly)'." />
+  </Target>
+</Project>

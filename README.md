@@ -965,7 +965,7 @@ asserted but no live server was in the loop.
 | Library backends: Gaseous, Retrom, Gameyfin | **Medium** — tested against fakes/disk | Gaseous confirmed against a test instance; Retrom and Gameyfin **need field reports** |
 | Frontend exports (LaunchBox, ES-DE, Playnite) | **Medium** — output asserted, apps not driven | The XML/JSON is tested; nobody has scripted LaunchBox itself |
 | `contrib/` Playnite extension | **High** — runtime-proven | `scripts/playnite_proof.ps1`: runs against the real Playnite SDK 6.11 and a live export — 200 games imported as real SDK objects, dedupe verified |
-| `contrib/` LaunchBox plugin | **Medium-high** — compiled + logic executed | `scripts/launchbox_proof/`: compiles clean, `Import()` runs against a live export with dedupe and platform auto-creation. The un-testable inch: LaunchBox's DLL is not redistributable, so the compile is against a reconstruction of its API |
+| `contrib/` LaunchBox plugin | **Medium-high** — compiled + logic executed | `scripts/launchbox_proof/`: .NET 10 harness compiles the plugin source against API stubs; `Import()` runs against a live export with dedupe and platform auto-creation. The remaining gap is verification against the nonredistributable LaunchBox API DLL |
 | Home Assistant add-on | **New, lightly tested** | The options→environment bridge is tested; the add-on lifecycle needs HA users |
 | armv7 Docker | **Degraded by design** | ROM Hub plugins unavailable there (no pydantic musl wheel); core works |
 

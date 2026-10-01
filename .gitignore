@@ -25,4 +25,6 @@ testinstall.py
 .firecrawl/
 scripts/launchbox_proof/bin/
 scripts/launchbox_proof/obj/
+contrib/launchbox/bin/
+contrib/launchbox/obj/
 .claude/

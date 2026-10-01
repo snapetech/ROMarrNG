@@ -24,7 +24,8 @@ empty library.
   [`scripts/launchbox_proof/`](../scripts/launchbox_proof/). The one inch
   that cannot be tested: `Unbroken.LaunchBox.Plugins.dll` is not
   redistributable, so the compile is against a reconstruction of the eight
-  API members the plugin touches, not the shipping assembly.
+  API members the plugin touches, not the shipping assembly. The proof harness
+  and plugin now target `net10.0-windows` for LaunchBox 14 and newer.
 
 The integration is still built on the exports first: a `gamelist.xml` has
 been read the same way for fifteen years, and no plugin API can break it.
@@ -66,18 +67,23 @@ Two ways in, and the second is the one to reach for first.
 **Import the XML.** Export `format=launchbox`, then in LaunchBox use
 **Tools → Import → LaunchBox XML**. Nothing to install and nothing to break.
 
-**Or build the plugin.** `launchbox/` is a .NET class library against
-`Unbroken.LaunchBox.Plugins`. It adds a *ROMarr → Sync* menu item.
+**Or build the plugin.** `launchbox/` is a .NET 10 class library against
+`Unbroken.LaunchBox.Plugins`. It adds a *ROMarr → Sync* menu item and targets
+LaunchBox 14 and newer, whose Windows host uses .NET 10. The normal XML import
+path remains available for older LaunchBox versions.
 
 ```
 cd contrib/launchbox
-dotnet build -c Release
+dotnet build -c Release -p:LaunchBoxApiAssembly="C:\path\to\Unbroken.LaunchBox.Plugins.dll"
 ```
 
-Copy the resulting DLL into `LaunchBox\Plugins\ROMarr\`. You will need
-`Unbroken.LaunchBox.Plugins.dll` from your own LaunchBox installation as a
-reference — it is not redistributable, which is the other reason this is not
-the recommended path.
+Set `LaunchBoxApiAssembly` to the path of `Unbroken.LaunchBox.Plugins.dll` in
+your own LaunchBox installation; the API DLL is not redistributable. The build
+requires the .NET 10 SDK. Copy the resulting
+`bin\Release\net10.0-windows\ROMarr.LaunchBox.dll` into
+`LaunchBox\Plugins\ROMarr\`. This remains the less-supported path because it
+depends on LaunchBox's plugin API; importing the XML has no plugin or SDK
+dependency.
 
 ## ES-DE, Batocera, RetroPie, Recalbox
 

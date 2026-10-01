@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.1] - 2026-10-01
+
+The optional LaunchBox plugin and its proof harness now target
+`net10.0-windows`, matching LaunchBox 14 and newer. Building the plugin requires
+the .NET 10 SDK and the nonredistributable LaunchBox API assembly from the
+operator's installation. The XML import path remains available for older
+LaunchBox versions.
+
 ## [0.12.0] - 2026-10-01
 
 ### Added

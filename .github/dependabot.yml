@@ -22,6 +22,48 @@ updates:
         patterns:
           - "*"
 
+  - package-ecosystem: nuget
+    directory: /scripts/launchbox_proof
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:15"
+      timezone: America/Regina
+    open-pull-requests-limit: 5
+    groups:
+      launchbox-proof-nuget-minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+      launchbox-proof-nuget-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  - package-ecosystem: nuget
+    directory: /contrib/launchbox
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:30"
+      timezone: America/Regina
+    open-pull-requests-limit: 5
+    groups:
+      launchbox-plugin-nuget-minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+      launchbox-plugin-nuget-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
   - package-ecosystem: docker
     directory: /
     schedule:
