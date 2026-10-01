@@ -6,7 +6,7 @@
 # the final image would be ~180MB of toolchain nobody runs. So the build stage
 # owns the toolchain and the runtime stage receives only the result.
 
-FROM python:3.13-alpine AS builder
+FROM python:3.14-alpine AS builder
 
 # build-base is needed only where a wheel is missing for the target arch. It is
 # unused on amd64/arm64 and load-bearing on armv7. libseccomp-dev is what
@@ -32,7 +32,7 @@ RUN if [ "$TARGETARCH" != "arm" ]; then \
     fi
 
 
-FROM python:3.13-alpine
+FROM python:3.14-alpine
 
 ARG TARGETARCH
 
