@@ -50,7 +50,7 @@ full claim-by-claim evidence file.*
 - [How it works](#how-it-works)
 - [The tour](#the-tour) — every feature, what it is for, and what it looks like
 - [Requirements](#requirements)
-- [Installation](#installation) — [Docker](#docker) · [Docker Compose](#docker-compose) · [Proxmox LXC](#proxmox-lxc) · [Home Assistant](#home-assistant) · [Source](#from-source)
+- [Installation](#installation) — [Docker](#docker) · [Docker Compose](#docker-compose) · [Proxmox LXC](#proxmox-lxc) · [Home Assistant](#home-assistant) · [YunoHost](#yunohost) · [Source](#from-source)
   - **[The full install guide](docs/INSTALL.md)** — every variable, backup, upgrade, rollback, troubleshooting
 - [Signing in](#signing-in)
 - [Configuration](#configuration)
@@ -403,6 +403,23 @@ Settings → Add-ons → Add-on Store → ⋮ → Repositories, add
 the add-on page become ROMarr's environment — see
 [homeassistant/romarr](homeassistant/romarr/README.md).
 
+### YunoHost
+
+ROMarrNG has a native YunoHost package for YunoHost 12.1 and newer on `amd64`
+and `arm64`. Install it from the app catalog when it becomes available, or
+install its `testing` branch while the catalog submission is under review:
+
+```bash
+sudo yunohost app install https://github.com/YunoHost-Apps/romarrng_ynh/tree/testing
+```
+
+The package requires a dedicated domain root and defaults access to YunoHost
+administrators. It keeps ROMarrNG's own password login enabled and binds the
+service to localhost behind YunoHost's Nginx proxy. Give the `romarrng` service
+account access to your library and download folders. The app backup includes
+settings and plugins; ROM library files are excluded and should be backed up
+separately. See [the package guide](packaging/yunohost/doc/ADMIN.md).
+
 ### From source
 
 ```bash
@@ -517,6 +534,7 @@ request actually came through it.
 | `ROMARR_PLAYERS` | no | Which browser players to offer, best first: `emulatorjs,ruffle,jsdos,emularity`. All four when unset; `none` turns every browser route off |
 | `ROMARR_JSDOS_URL` / `ROMARR_EMULARITY_URL` | no | Where your own js-dos and Emularity live. Without one, ROMarr reports that the player *would* run a file and names the setting that would let it link there |
 | `ROMARR_DATA` | no | Path to the state file |
+| `ROMARR_HOST` | no | Address to listen on (default `0.0.0.0`); use `127.0.0.1` only when the proxy shares the host network namespace |
 | `DAT_PATH` | no | Directory of No-Intro / Redump DATs. Loose `.dat`/`.xml` files **and** the ZIP archives No-Intro distributes are read, including one level down beside the platform they describe. Point it at a DAT directory, not at your ROM library |
 | `COMPRESSATORIUM_URL` | no | A [Compressatorium](https://github.com/pacnpal/compressatorium) service, for the Decompress task: batch decompress a compressed library, verify every output against the DATs, and delete only the originals that verified. The library must be mounted into both containers at the same path |
 | `COMPRESSATORIUM_API_KEY` | no | Bearer token, when Compressatorium has `COMPRESSATORIUM_ENABLE_AUTH=true` |

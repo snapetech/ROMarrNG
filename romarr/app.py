@@ -113,7 +113,7 @@ from .ui import login_page as ui_login_page
 
 log = logging.getLogger(__name__)
 
-VERSION = "0.12.1"
+VERSION = "0.12.2"
 
 # What ROMarr labels its own downloads with, so its jobs are distinguishable
 # from everything else in a shared client -- the same reason Radarr and Sonarr
@@ -6490,14 +6490,15 @@ def make_handler(service: ROMarr):
 
 
 def serve(port: int = 6868, env: dict[str, str] | None = None):
+    e = env if env is not None else os.environ
+    host = e.get("ROMARR_HOST", "0.0.0.0")
     service = ROMarr(env)
-    httpd = ThreadingHTTPServer(("0.0.0.0", port), make_handler(service))
+    httpd = ThreadingHTTPServer((host, port), make_handler(service))
 
     # Native HTTPS, for installs with no reverse proxy in front. Both
     # variables or neither: half a cert is a typo, and refusing to boot over
     # a typo would take the whole service down -- so it logs, serves HTTP,
     # and the operator reads why.
-    e = env if env is not None else os.environ
     cert = e.get("ROMARR_SSL_CERT", "")
     key = e.get("ROMARR_SSL_KEY", "")
     scheme = "http"
@@ -6512,6 +6513,6 @@ def serve(port: int = 6868, env: dict[str, str] | None = None):
             log.error("could not load ROMARR_SSL_CERT/ROMARR_SSL_KEY (%s); "
                       "serving plain HTTP", err)
 
-    log.info("ROMarr listening on %s://0.0.0.0:%d, library=%s",
-             scheme, port, service.library)
+    log.info("ROMarr listening on %s://%s:%d, library=%s",
+             scheme, host, port, service.library)
     httpd.serve_forever()

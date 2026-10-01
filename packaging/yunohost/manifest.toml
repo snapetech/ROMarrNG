@@ -1,0 +1,66 @@
+# :schema https://raw.githubusercontent.com/YunoHost/apps/main/schemas/manifest.v2.schema.json
+
+packaging_format = 2
+
+id = "romarrng"
+name = "ROMarrNG"
+description.en = "Game ROM discovery, acquisition, and library management"
+version = "0.12.1~ynh1"
+maintainers = ["snapetech"]
+
+[upstream]
+license = "MIT"
+website = "https://github.com/snapetech/ROMarrNG"
+userdoc = "https://github.com/snapetech/ROMarrNG#yunohost"
+admindoc = "https://github.com/snapetech/ROMarrNG/blob/main/packaging/yunohost/doc/ADMIN.md"
+code = "https://github.com/snapetech/ROMarrNG"
+
+[integration]
+yunohost = ">= 12.1.17"
+helpers_version = "2.1"
+architectures = ["amd64", "arm64"]
+multi_instance = true
+ldap = false
+sso = false
+disk = "1G"
+ram.build = "150M"
+ram.runtime = "512M"
+
+[install]
+  [install.domain]
+  type = "domain"
+
+  [install.path]
+  type = "path"
+  default = "/"
+  pattern = { regexp = "^/$", error = "ROMarrNG must be installed at the root of a dedicated domain; URL subpaths are not supported." }
+
+  [install.init_main_permission]
+  type = "group"
+  default = "admins"
+
+[resources]
+  [resources.sources]
+    [resources.sources.main]
+    in_subdir = true
+    format = "tar.gz"
+    url = "https://github.com/snapetech/ROMarrNG/archive/refs/tags/v0.12.1.tar.gz"
+    sha256 = "4bea818313c84ca05d58ccfc9e3314d103931c4dec761d1738b060dae45f01a3"
+    autoupdate.strategy = "latest_github_tag"
+
+  [resources.system_user]
+
+  [resources.install_dir]
+
+  [resources.data_dir]
+
+  [resources.permissions]
+  main.url = "/"
+  main.auth_header = false
+  main.show_tile = true
+
+  [resources.ports]
+  main.default = 6868
+
+  [resources.apt]
+  packages = ["git", "libarchive-tools", "libseccomp2", "python3-venv"]

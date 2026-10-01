@@ -90,6 +90,7 @@ RUN chmod +x /entrypoint.sh && mkdir -p /config /roms
 # `docker compose pull`.
 ENV ROMARR_DATA=/config/romarr.json \
     ROM_HUB_HOME=/config/rom-hub \
+    ROMARR_HOST=0.0.0.0 \
     ROMARR_PORT=6868 \
     PUID=1000 \
     PGID=1000 \

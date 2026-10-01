@@ -422,7 +422,7 @@ Once ROMarr has run once, change these on the **Settings** pages:
 The variables that are read on **every** start, and can be changed in the
 environment at any time:
 
-`ROMARR_PORT`, `ROMARR_DATA`, `ROMARR_PASSWORD`, `ROMARR_API_KEY`,
+`ROMARR_PORT`, `ROMARR_HOST`, `ROMARR_DATA`, `ROMARR_PASSWORD`, `ROMARR_API_KEY`,
 `ROMARR_AUTH` and the SSO set, `ROMARR_SSL_CERT` / `ROMARR_SSL_KEY`,
 `ROMARR_PLAYERS`, `ROMARR_JSDOS_URL`, `ROMARR_EMULARITY_URL`, `LOG_LEVEL`,
 `DAT_PATH`, the `MOONLIGHT_*` and `WOLF_*` set, `STREAM_SERVER_URL`,
@@ -469,6 +469,7 @@ Every variable ROMarr reads. "Seeded" means first-run only — see
 | Variable | Default | If it is wrong |
 |---|---|---|
 | `ROMARR_PORT` | `6868` | Nothing listens where you expect. Change the published port to match. |
+| `ROMARR_HOST` | `0.0.0.0` | The address ROMarr listens on. Use `127.0.0.1` only when the proxy shares the host network namespace. |
 | `ROMARR_DATA` | `/opt/romarr/romarr.json` (`/config/romarr.json` in Docker) | Points at a new file → a fresh, unclaimed install with a new API key. Points at an unreadable file → **ROMarr refuses to start** and says so, rather than overwriting it. |
 | `LOG_LEVEL` | `INFO` | `DEBUG` for the full request trace. |
 | `PUID` / `PGID` | `1000` / `1000` | Imported ROMs are owned by the wrong user; your library server may not be able to read them. Docker only. |

@@ -1,0 +1,20 @@
+#!/bin/bash
+
+source _common.sh
+
+ynh_script_progression "Installing ROMarrNG release files..."
+ynh_setup_source --dest_dir="$install_dir" --source_id="main"
+chown -R "$app:$app" "$install_dir"
+
+ynh_script_progression "Preparing persistent settings, plugins, and the default library..."
+romarrng_prepare_data
+romarrng_install_python_dependencies
+
+ynh_script_progression "Configuring the localhost service and Nginx reverse proxy..."
+romarrng_prepare_service
+
+ynh_script_progression "Starting ROMarrNG..."
+romarrng_start_service
+romarrng_register_service
+
+ynh_script_progression "ROMarrNG installation completed"

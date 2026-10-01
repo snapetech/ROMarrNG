@@ -1,0 +1,31 @@
+#!/bin/bash
+
+source ../settings/scripts/_common.sh
+
+ynh_script_progression "Restoring ROMarrNG files..."
+ynh_restore "$install_dir"
+
+if [[ ! -d "$YNH_APP_BACKUP_DIR/data" ]]; then
+	ynh_die --message="ROMarrNG settings and plugin snapshot is missing from this backup."
+fi
+install -d -o "$app" -g "$app" -m 0750 "$data_dir"
+rsync --archive --delete \
+	--exclude="/library/" \
+	--exclude="/logs/" \
+	"$YNH_APP_BACKUP_DIR/data/" "$data_dir/"
+chown -R "$app:$app" "$install_dir"
+chown "$app:$app" "$data_dir"
+
+ynh_script_progression "Rebuilding ROMarrNG's Python environment..."
+rm -rf "$install_dir/venv"
+romarrng_prepare_data
+romarrng_install_python_dependencies
+
+ynh_script_progression "Restoring ROMarrNG's service and reverse proxy..."
+romarrng_prepare_service
+
+ynh_script_progression "Starting ROMarrNG..."
+romarrng_start_service
+romarrng_register_service
+
+ynh_script_progression "ROMarrNG restoration completed"

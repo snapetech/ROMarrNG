@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.12.2] - 2026-10-01
+
+ROMarrNG can now bind to a configured network address with `ROMARR_HOST`. The
+container continues to listen on all interfaces; the YunoHost package binds
+only to localhost so requests pass through YunoHost's access controls.
+
 ## [0.12.1] - 2026-10-01
 
 The optional LaunchBox plugin and its proof harness now target

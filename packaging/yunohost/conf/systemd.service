@@ -1,0 +1,37 @@
+[Unit]
+Description=ROMarrNG game library and acquisition service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__APP__
+Group=__APP__
+WorkingDirectory=__INSTALL_DIR__
+Environment="HOME=__DATA_DIR__"
+Environment="ROMARR_DATA=__DATA_DIR__/romarr.json"
+Environment="ROMARR_HOST=127.0.0.1"
+Environment="ROMARR_PORT=__PORT__"
+Environment="ROM_HUB_HOME=__DATA_DIR__/rom-hub"
+Environment="LIBRARY_PATH=__DATA_DIR__/library"
+Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONDONTWRITEBYTECODE=1"
+ExecStart=__INSTALL_DIR__/venv/bin/python -m romarr
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+StandardOutput=append:/var/log/__APP__/__APP__.log
+StandardError=append:/var/log/__APP__/__APP__.log
+SyslogIdentifier=__APP__
+
+[Install]
+WantedBy=multi-user.target

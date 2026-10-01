@@ -1,0 +1,12 @@
+#!/bin/bash
+
+source _common.sh
+
+if [[ "$new_path" != "/" ]]; then
+	ynh_die --message="ROMarrNG does not support URL subpaths. Choose the root of a dedicated domain."
+fi
+
+ynh_script_progression "Updating ROMarrNG's Nginx domain configuration..."
+ynh_change_url_nginx_config
+
+ynh_script_progression "ROMarrNG URL update completed"
