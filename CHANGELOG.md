@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.12.3] - 2026-10-01
+
+### User-facing changes
+
+#### Fixed
+
+- **Setup:** The setup guide now recognizes every configured download client. Users installing ROMarrNG alone or alongside SeerrNG will see an accurate status instead of a permanent “not set up” message.
+  - **Action required:** Update ROMarrNG to the new release.
+
 ## [0.12.2] - 2026-10-01
 
 ROMarrNG can now bind to a configured network address with `ROMARR_HOST`. The
