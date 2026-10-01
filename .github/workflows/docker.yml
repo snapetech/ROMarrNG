@@ -21,6 +21,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  release-notes:
+    name: Release-note contract
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Validate release-note fragment or explicit opt-out
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+          PR_BODY: ${{ github.event_name == 'pull_request' && github.event.pull_request.body || github.event.head_commit.message || '' }}
+        run: |
+          set -euo pipefail
+          body_file="$RUNNER_TEMP/pr-body.md"
+          printf '%s' "$PR_BODY" > "$body_file"
+          validation_args=()
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            validation_args+=(--allow-mixed-push-batch)
+          fi
+          python scripts/release_notes.py check \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --pr-body "$body_file" \
+            --summary-file "$GITHUB_STEP_SUMMARY" \
+            "${validation_args[@]}"
+          python scripts/release_notes.py check-changelog-tags
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -39,7 +74,8 @@ jobs:
         run: python -m pytest tests/ -q
 
   image:
-    needs: test
+    needs: [test, release-notes]
+    if: always() && needs.test.result == 'success' && (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -210,6 +246,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate changelog tag coverage
+        run: python scripts/release_notes.py check-changelog-tags
+
       - name: Extract changelog entry
         env:
           TAG: ${{ github.ref_name }}
@@ -224,6 +263,13 @@ jobs:
             copying { print }
             END { if (!found) exit 1 }
           ' CHANGELOG.md > release-notes.md
+          previous_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${GITHUB_SHA}^")"
+          python scripts/release_notes.py assemble \
+            --previous-tag "$previous_tag" \
+            --head "$GITHUB_SHA" \
+            --changelog release-notes.md \
+            --output release-notes.md \
+            --require-prepared-changelog
           {
             echo ""
             echo "**Container image**: \`${IMAGE}:${VERSION}\`"
@@ -239,3 +285,72 @@ jobs:
           name: ROMarrNG ${{ github.ref_name }}
           body_path: release-notes.md
           draft: false
+
+      - name: Announce release to Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          TAG: ${{ github.ref_name }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/romarrng
+          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+          WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DISCORD_WEBHOOK" || {
+            echo 'DISCORD_RELEASE_WEBHOOK is required to complete a release.' >&2
+            exit 1
+          }
+          version="${TAG#v}"
+          image_ref="${IMAGE}:${version}"
+          python scripts/release_notes.py split-discord --input release-notes.md > chunks.json
+          chunk_count="$(jq 'length' chunks.json)"
+          (( chunk_count > 0 )) || {
+            echo 'The generated release notes are empty.' >&2
+            exit 1
+          }
+
+          webhook_url="$DISCORD_WEBHOOK"
+          if [[ "$webhook_url" == *'?'* ]]; then
+            webhook_url+='&wait=true'
+          else
+            webhook_url+='?wait=true'
+          fi
+
+          for ((index = 0; index < chunk_count; index++)); do
+            description="$(jq -r --argjson index "$index" '.[$index]' chunks.json)"
+            number=$((index + 1))
+            title="ROMarrNG ${TAG} release notes (${number}/${chunk_count})"
+            jq -n \
+              --arg username "ROMarrNG Releases" \
+              --arg title "$title" \
+              --arg url "$RELEASE_URL" \
+              --arg description "$description" \
+              --arg image "$image_ref" \
+              --arg workflow "$WORKFLOW_URL" \
+              --argjson first "$index" \
+              '{
+                username: $username,
+                embeds: [{
+                  title: $title,
+                  url: $url,
+                  description: $description,
+                  color: 5814783,
+                  fields: (if $first == 0 then [
+                    { name: "Image", value: $image, inline: false },
+                    { name: "Workflow", value: $workflow, inline: false }
+                  ] else [] end)
+                }]
+              }' > payload.json
+
+            response="$(curl --fail --silent --show-error \
+              -H "Content-Type: application/json" \
+              -X POST \
+              --data @payload.json \
+              "$webhook_url")"
+            jq -e --arg description "$description" \
+              '.id != null and .embeds[0].description == $description' \
+              <<< "$response" > /dev/null
+            if (( number < chunk_count )); then
+              sleep 1
+            fi
+          done
