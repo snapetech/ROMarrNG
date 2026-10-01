@@ -63,4 +63,4 @@ ram.runtime = "512M"
   main.default = 6868
 
   [resources.apt]
-  packages = ["git", "libarchive-tools", "libseccomp2", "python3-venv"]
+  packages = ["git", "libarchive-tools", "libseccomp2", "python3-venv", "rsync"]
