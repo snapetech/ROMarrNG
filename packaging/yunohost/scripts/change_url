@@ -1,12 +1,35 @@
 #!/bin/bash
 
+#=================================================
+# IMPORT GENERIC HELPERS
+#=================================================
+
 source _common.sh
+source /usr/share/yunohost/helpers
 
 if [[ "$new_path" != "/" ]]; then
 	ynh_die --message="ROMarrNG does not support URL subpaths. Choose the root of a dedicated domain."
 fi
 
-ynh_script_progression "Updating ROMarrNG's Nginx domain configuration..."
-ynh_change_url_nginx_config
+#=================================================
+# STOP SYSTEMD SERVICE
+#=================================================
+ynh_script_progression "Stopping ROMarrNG..."
+ynh_systemctl --service="$app" --action="stop"
 
-ynh_script_progression "ROMarrNG URL update completed"
+#=================================================
+# MODIFY URL IN NGINX CONF
+#=================================================
+ynh_script_progression "Updating ROMarrNG's Nginx domain configuration..."
+ynh_config_change_url_nginx
+
+#=================================================
+# START SYSTEMD SERVICE
+#=================================================
+ynh_script_progression "Starting ROMarrNG..."
+romarrng_start_service
+
+#=================================================
+# END OF SCRIPT
+#=================================================
+ynh_script_progression "Change of URL completed for $app"

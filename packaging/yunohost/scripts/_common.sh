@@ -1,6 +1,12 @@
 #!/bin/bash
 
-source /usr/share/yunohost/helpers
+#=================================================
+# COMMON VARIABLES AND CUSTOM HELPERS
+#=================================================
+
+#=================================================
+# PERSONAL HELPERS
+#=================================================
 
 romarrng_prepare_data() {
 	local directory

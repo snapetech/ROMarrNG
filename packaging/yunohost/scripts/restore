@@ -1,7 +1,15 @@
 #!/bin/bash
 
-source ../settings/scripts/_common.sh
+#=================================================
+# IMPORT GENERIC HELPERS
+#=================================================
 
+source ../settings/scripts/_common.sh
+source /usr/share/yunohost/helpers
+
+#=================================================
+# RESTORE THE APP MAIN DIR
+#=================================================
 ynh_script_progression "Restoring ROMarrNG files..."
 ynh_restore "$install_dir"
 
@@ -16,16 +24,32 @@ rsync --archive --delete \
 chown -R "$app:$app" "$install_dir"
 chown "$app:$app" "$data_dir"
 
+#=================================================
+# RESTORE SETTINGS AND PLUGINS
+#=================================================
 ynh_script_progression "Rebuilding ROMarrNG's Python environment..."
 rm -rf "$install_dir/venv"
 romarrng_prepare_data
 romarrng_install_python_dependencies
 
+#=================================================
+# RESTORE SYSTEM CONFIGURATION
+#=================================================
 ynh_script_progression "Restoring ROMarrNG's service and reverse proxy..."
 romarrng_prepare_service
-
-ynh_script_progression "Starting ROMarrNG..."
-romarrng_start_service
+ynh_restore "/etc/nginx/conf.d/$domain.d/$app.conf"
+ynh_restore "/etc/systemd/system/$app.service"
+systemctl enable "$app.service" --quiet
+ynh_restore "/etc/logrotate.d/$app"
 romarrng_register_service
 
-ynh_script_progression "ROMarrNG restoration completed"
+#=================================================
+# START SYSTEMD SERVICE
+#=================================================
+ynh_script_progression "Starting ROMarrNG..."
+romarrng_start_service
+
+#=================================================
+# END OF SCRIPT
+#=================================================
+ynh_script_progression "Restoration of $app completed"

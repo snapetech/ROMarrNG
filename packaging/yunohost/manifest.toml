@@ -1,4 +1,4 @@
-# :schema https://raw.githubusercontent.com/YunoHost/apps/main/schemas/manifest.v2.schema.json
+#:schema https://raw.githubusercontent.com/YunoHost/apps/main/schemas/manifest.v2.schema.json
 
 packaging_format = 2
 
@@ -63,4 +63,4 @@ ram.runtime = "512M"
   main.default = 6868
 
   [resources.apt]
-  packages = ["git", "libarchive-tools", "libseccomp2", "python3-venv", "rsync"]
+    packages = "git, libarchive-tools, libseccomp2, python3-venv, rsync"

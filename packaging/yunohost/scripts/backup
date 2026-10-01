@@ -1,6 +1,11 @@
 #!/bin/bash
 
+#=================================================
+# IMPORT GENERIC HELPERS
+#=================================================
+
 source ../settings/scripts/_common.sh
+source /usr/share/yunohost/helpers
 
 service_was_active=false
 
@@ -20,12 +25,18 @@ finish_backup() {
 
 trap finish_backup EXIT
 
+#=================================================
+# STOP THE SERVICE FOR A CONSISTENT STATE SNAPSHOT
+#=================================================
 if systemctl is-active --quiet "$app"; then
 	service_was_active=true
 	ynh_script_progression "Stopping ROMarrNG for a consistent state backup..."
 	ynh_systemctl --service="$app" --action="stop"
 fi
 
+#=================================================
+# BACKUP SETTINGS AND PLUGINS
+#=================================================
 ynh_script_progression "Snapshotting ROMarrNG settings and plugins..."
 mkdir -p "$YNH_APP_BACKUP_DIR/data"
 rsync --archive --delete \
@@ -33,9 +44,19 @@ rsync --archive --delete \
 	--exclude="/logs/" \
 	"$data_dir/" "$YNH_APP_BACKUP_DIR/data/"
 
-ynh_script_progression "Declaring ROMarrNG files for backup..."
+#=================================================
+# BACKUP THE APP MAIN DIR
+#=================================================
 ynh_backup "$install_dir"
+
+#=================================================
+# BACKUP SYSTEM CONFIGURATION
+#=================================================
 ynh_backup "/etc/nginx/conf.d/$domain.d/$app.conf"
 ynh_backup "/etc/systemd/system/$app.service"
+ynh_backup "/etc/logrotate.d/$app"
 
+#=================================================
+# END OF SCRIPT
+#=================================================
 ynh_print_info "ROMarrNG backup declaration completed"

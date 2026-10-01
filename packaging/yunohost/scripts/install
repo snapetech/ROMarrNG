@@ -1,20 +1,41 @@
 #!/bin/bash
 
-source _common.sh
+#=================================================
+# IMPORT GENERIC HELPERS
+#=================================================
 
-ynh_script_progression "Installing ROMarrNG release files..."
+source _common.sh
+source /usr/share/yunohost/helpers
+
+#=================================================
+# DOWNLOAD, CHECK AND UNPACK SOURCE
+#=================================================
+ynh_script_progression "Installing ROMarrNG source files..."
 ynh_setup_source --dest_dir="$install_dir" --source_id="main"
 chown -R "$app:$app" "$install_dir"
 
-ynh_script_progression "Preparing persistent settings, plugins, and the default library..."
+#=================================================
+# APP INITIAL CONFIGURATION
+#=================================================
+ynh_script_progression "Preparing ROMarrNG's settings, plugins, and default library..."
+
 romarrng_prepare_data
 romarrng_install_python_dependencies
 
+#=================================================
+# SYSTEM CONFIGURATION
+#=================================================
 ynh_script_progression "Configuring the localhost service and Nginx reverse proxy..."
 romarrng_prepare_service
-
-ynh_script_progression "Starting ROMarrNG..."
-romarrng_start_service
 romarrng_register_service
 
-ynh_script_progression "ROMarrNG installation completed"
+#=================================================
+# START SYSTEMD SERVICE
+#=================================================
+ynh_script_progression "Starting ROMarrNG..."
+romarrng_start_service
+
+#=================================================
+# END OF SCRIPT
+#=================================================
+ynh_script_progression "Installation of $app completed"
