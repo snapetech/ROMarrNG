@@ -34,24 +34,22 @@ romarrng_prepare_data() {
 }
 
 romarrng_install_python_dependencies() {
-	local runtime_dir="/opt/yunohost/$app"
-	local uv_dir="$runtime_dir/uv"
+	local uv_dir="$install_dir/uv"
 	local uv_bin="$uv_dir/uv"
-	local python_dir="$runtime_dir/uv-python"
+	local python_dir="$install_dir/uv-python"
 	local python_cache_dir
 
-	install -d -o root -g root -m 0755 "$runtime_dir"
 	ynh_setup_source --dest_dir="$uv_dir" --source_id="uv" --full_replace
 	chown -R root:root "$uv_dir"
 	chmod 0755 "$uv_bin"
 	install -d -o root -g root -m 0755 "$python_dir"
 	python_cache_dir="$(mktemp -d /tmp/romarrng-uv-cache.XXXXXX)"
 	UV_CACHE_DIR="$python_cache_dir" UV_PYTHON_INSTALL_DIR="$python_dir" \
-		"$uv_bin" python install 3.12.14
+		"$uv_bin" python install 3.12
 	rm -rf -- "$python_cache_dir"
 
 	ynh_exec_as_app env UV_PYTHON_INSTALL_DIR="$python_dir" "$uv_bin" venv \
-		--python 3.12.14 \
+		--python 3.12 \
 		--managed-python \
 		"$install_dir/venv"
 	ynh_hide_warnings ynh_exec_as_app env UV_PYTHON_INSTALL_DIR="$python_dir" "$uv_bin" pip install \
