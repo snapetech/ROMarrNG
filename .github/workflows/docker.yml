@@ -273,7 +273,8 @@ jobs:
   # Debian variant for the optional Playwright download client. Keep it on
   # separate tags so the default Alpine image and `latest` remain unchanged.
   image-browser:
-    needs: image
+    needs: [image, release-notes]
+    if: always() && needs.image.result == 'success' && (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -356,7 +357,7 @@ jobs:
           push-to-registry: true
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: always() && startsWith(github.ref, 'refs/tags/v') && needs.image.result == 'success' && needs.image-browser.result == 'success'
     needs: [image, image-browser]
     runs-on: ubuntu-latest
     permissions:
