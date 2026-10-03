@@ -389,8 +389,17 @@ def command_assemble(arguments: argparse.Namespace) -> int:
     changelog = Path(arguments.changelog).read_text(encoding="utf-8")
     curated_notes = format_curated_notes(notes)
     if arguments.require_prepared_changelog:
+        # Only inspect the newest release section. Searching the whole file
+        # also captures the next release's heading and notes because the
+        # previous release may use the same "User-facing changes" heading.
+        sections = list(re.finditer(r"(?m)^## .+$", changelog))
+        current_section = ""
+        if sections:
+            section_end = sections[1].start() if len(sections) > 1 else len(changelog)
+            current_section = changelog[sections[0].start():section_end]
         prepared = re.search(
-            r"(?ms)^### User-facing changes\s*\n.*?(?=^### |\Z)", changelog
+            r"(?ms)^### User-facing changes\s*\n.*?(?=^### |\Z)",
+            current_section,
         )
         if not prepared or prepared.group(0).strip() != curated_notes:
             print(
