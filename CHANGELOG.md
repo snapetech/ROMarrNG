@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.13.0] - 2026-10-03
+
+### User-facing changes
+
+#### Added
+
+- **Browser Downloads:** ROMarrNG now publishes a Debian browser image with the Playwright client for sites that require a real browser. The browser server runs separately at the matching Playwright version; the default image and direct downloads are unchanged.
+  - **Action required:** Use the ROMarrNG Browser template and configure a matching Playwright server for browser downloads.
+
+#### Changed
+
+- **Release Pipeline:** ROMarrNG release notes now include curated summaries and required upgrade actions, so people can see what changed without reading commit history.
+- **Notifications:** The connection editor can test the values currently entered before saving and reports endpoint or network failure details. Masked secrets from saved connections are restored for the test when left unchanged.
+
+#### Fixed
+
+- **Collections:** The 1G1R collection planner now follows the configured library layout, including nested RomM libraries, so it recognizes games inside each platform's `roms` directory.
+
+#### Security
+
+- **Containers:** **Breaking:** The Docker Compose example now uses a read-only root filesystem, drops unnecessary capabilities, and enables no-new-privileges. Sunshine connections require a trusted CA or certificate pin; published images also carry signed provenance and SPDX SBOM attestations.
+  - **Action required:** Configure MOONLIGHT_TLS_CA_FILE or MOONLIGHT_TLS_FINGERPRINT, or explicitly opt in to insecure TLS on a trusted LAN.
+- **Integration:** SeerrNG can now use its own integration-only key. Concurrent submissions are deduplicated, request bodies and workers are bounded, and plugin operations stop when seccomp is unavailable unless an operator explicitly opts out.
+
 ## [0.12.3] - 2026-10-01
 
 ### User-facing changes

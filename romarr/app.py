@@ -197,7 +197,7 @@ def _is_seerr_integration_path(path: str) -> bool:
         for prefix in ("/api/integration/seerrng/v1", "/api/v1/integration")
     )
 
-VERSION = "0.12.3"
+VERSION = "0.13.0"
 
 # What ROMarr labels its own downloads with, so its jobs are distinguishable
 # from everything else in a shared client -- the same reason Radarr and Sonarr
