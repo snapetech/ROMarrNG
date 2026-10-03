@@ -1,8 +1,8 @@
 """What a plugin subprocess is handed.
 
-ROM Hub plugins are code, and running one means running it with ROMarr's
-privileges -- there is no sandbox and SECURITY.md says so. That makes the
-environment the one boundary actually being enforced, so it is worth a test.
+ROM Hub's seccomp filter confines network and execution, but filesystem
+confinement is not in place. The environment allowlist remains a separate
+boundary and must not hand plugins ROMarr's or its clients' credentials.
 
 It used to be `dict(os.environ, ...)`: every plugin inherited ROMARR_API_KEY,
 ROMARR_PASSWORD, PROWLARR_API_KEY, QBITTORRENT_PASS and LIBRARY_PASSWORD. A
@@ -17,6 +17,14 @@ import pathlib
 import pytest
 
 from romarr import hub
+
+
+@pytest.fixture(autouse=True)
+def plugin_environment_is_confined(monkeypatch):
+    # These tests pin the environment allowlist; seccomp availability belongs
+    # to the separate sandbox tests and varies with the host running pytest.
+    monkeypatch.setattr(hub, "sandbox_state",
+                        lambda: (True, "seccomp filter available"))
 
 
 @pytest.fixture

@@ -12,6 +12,7 @@ and -- most of the file -- every place it must refuse to claim something.
 from __future__ import annotations
 
 import json
+import hashlib
 
 import pytest
 
@@ -409,6 +410,92 @@ def test_wolf_without_a_socket_or_a_proxy_says_which_to_configure():
     assert "WOLF_API_URL" in str(raised.value)
 
 
+def test_romarr_wolf_client_refuses_unlisted_privileged_routes():
+    host = MoonlightHost("h", kind=WOLF)
+    with pytest.raises(playability._NoWayIn, match="only uses Wolf"):
+        host._wolf_call("POST", "/commands", {"command": "anything"})
+
+
+def test_sunshine_requires_a_trusted_ca_pin_or_explicit_insecure_choice():
+    host = MoonlightHost("h", kind=SUNSHINE,
+                         username="admin", password="unique-password")
+    with pytest.raises(playability._NoWayIn, match="TLS identity is not configured"):
+        host._sunshine_get("/apps")
+
+
+def test_sunshine_pinned_tls_checks_the_certificate_before_sending_credentials(
+    monkeypatch
+):
+    certificate = b"fixture sunshine certificate"
+    sent = []
+
+    class Reply:
+        status = 200
+
+        def read(self, _limit):
+            return b'{"apps": []}'
+
+    class Connection:
+        def __init__(self, *_args, **_kwargs):
+            self.sock = None
+
+        def connect(self):
+            self.sock = self
+
+        def getpeercert(self, *, binary_form=False):
+            assert binary_form is True
+            return certificate
+
+        def request(self, method, path, body=None, headers=None):
+            sent.append((method, path, body, headers))
+
+        def getresponse(self):
+            return Reply()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(playability.http.client, "HTTPSConnection", Connection)
+    pin = ":".join(hashlib.sha256(certificate).hexdigest()[i:i + 2]
+                    for i in range(0, 64, 2))
+    host = MoonlightHost(
+        "sunshine", kind=SUNSHINE, username="admin", password="secret",
+        tls_fingerprint="SHA256 Fingerprint=" + pin)
+
+    assert host._sunshine_get("/apps") == {"apps": []}
+    assert sent[0][0:2] == ("GET", "/api/apps")
+    assert sent[0][3]["Authorization"].startswith("Basic ")
+
+
+def test_sunshine_wrong_certificate_pin_stops_before_basic_auth(monkeypatch):
+    certificate = b"fixture sunshine certificate"
+    sent = []
+
+    class Connection:
+        def __init__(self, *_args, **_kwargs):
+            self.sock = None
+
+        def connect(self):
+            self.sock = self
+
+        def getpeercert(self, *, binary_form=False):
+            return certificate
+
+        def request(self, *_args, **_kwargs):
+            sent.append(True)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(playability.http.client, "HTTPSConnection", Connection)
+    host = MoonlightHost(
+        "sunshine", kind=SUNSHINE, username="admin", password="secret",
+        tls_fingerprint="00" * 32)
+    with pytest.raises(playability._NoWayIn, match="fingerprint did not match"):
+        host._sunshine_get("/apps")
+    assert sent == []
+
+
 def test_sunshine_without_a_credential_says_which_to_configure():
     host = MoonlightHost("h", kind=SUNSHINE)
     with pytest.raises(playability._NoWayIn) as raised:
@@ -584,6 +671,18 @@ def test_the_credential_is_never_written_to_the_store(tmp_path):
     dumped = json.dumps(service.store.settings)
     assert "hunter2" not in dumped
     assert "sunshine" not in dumped
+
+
+def test_sunshine_tls_trust_settings_are_applied_but_not_persisted(tmp_path):
+    fingerprint = "a1" * 32
+    service = wired(
+        tmp_path,
+        MOONLIGHT_HOST="192.0.2.1",
+        MOONLIGHT_KIND="sunshine",
+        MOONLIGHT_TLS_FINGERPRINT=fingerprint,
+    )
+    assert service.moonlight.tls_fingerprint == fingerprint
+    assert fingerprint not in json.dumps(service.store.settings)
 
 
 def test_both_new_routes_are_documented(tmp_path):

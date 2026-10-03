@@ -1,0 +1,68 @@
+# ROMarrNG's browser edition: the same app on glibc with Playwright's Python
+# client installed. Chromium stays in a separate browser container so users
+# who only use direct downloads do not carry its large runtime image.
+
+ARG PLAYWRIGHT_VERSION=1.62.0
+
+FROM python:3.14-slim AS builder
+
+ARG TARGETARCH
+ARG PLAYWRIGHT_VERSION
+
+# pyseccomp links against libseccomp; build tools stay out of the runtime image.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential libseccomp-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --prefix=/install -r /tmp/requirements.txt \
+ && pip install --no-cache-dir --prefix=/install \
+      "playwright==${PLAYWRIGHT_VERSION}" \
+ && if [ "$TARGETARCH" != "arm" ]; then \
+      pip install --no-cache-dir --prefix=/install \
+        "rom-hub @ https://github.com/BlizzHacker/rom-hub/archive/8e46348783546ee03b00e2c933155ba60d29619d.tar.gz"; \
+    fi
+
+FROM python:3.14-slim
+
+ARG PLAYWRIGHT_VERSION
+
+# gosu is su-exec's Debian twin; the shared entrypoint uses the same uid:gid
+# command form on both images. Chromium is intentionally not installed here.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      gosu tzdata libarchive-tools libseccomp2 git ca-certificates \
+ && ln -s "$(command -v gosu)" /usr/local/bin/su-exec \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /install /usr/local
+
+WORKDIR /app
+COPY romarr/ /app/romarr/
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh && mkdir -p /config /roms
+
+ENV ROMARR_DATA=/config/romarr.json \
+    ROM_HUB_HOME=/config/rom-hub \
+    ROMARR_HOST=0.0.0.0 \
+    ROMARR_PORT=6868 \
+    PUID=1000 \
+    PGID=1000 \
+    UMASK=002 \
+    PLAYWRIGHT_VERSION=${PLAYWRIGHT_VERSION} \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+VOLUME /config
+EXPOSE 6868
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import os,urllib.request;urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('ROMARR_PORT','6868')+'/api/health',timeout=4)"
+
+LABEL org.opencontainers.image.title="ROMarrNG (browser edition)" \
+      org.opencontainers.image.description="ROMarrNG on Debian with the Playwright client for the Headless Browser download client" \
+      org.opencontainers.image.source="https://github.com/snapetech/ROMarrNG" \
+      org.opencontainers.image.licenses="MIT"
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["python", "-m", "romarr"]

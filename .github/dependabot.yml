@@ -10,14 +10,14 @@ updates:
     open-pull-requests-limit: 10
     versioning-strategy: increase
     groups:
-      pip-minor-and-patch:
+      release-note-none-pip-minor-and-patch:
         applies-to: version-updates
         patterns:
           - "*"
         update-types:
           - minor
           - patch
-      pip-security:
+      release-note-none-pip-security:
         applies-to: security-updates
         patterns:
           - "*"
@@ -31,14 +31,14 @@ updates:
       timezone: America/Regina
     open-pull-requests-limit: 5
     groups:
-      launchbox-proof-nuget-minor-and-patch:
+      release-note-none-launchbox-proof-nuget-minor-and-patch:
         applies-to: version-updates
         patterns:
           - "*"
         update-types:
           - minor
           - patch
-      launchbox-proof-nuget-security:
+      release-note-none-launchbox-proof-nuget-security:
         applies-to: security-updates
         patterns:
           - "*"
@@ -52,14 +52,14 @@ updates:
       timezone: America/Regina
     open-pull-requests-limit: 5
     groups:
-      launchbox-plugin-nuget-minor-and-patch:
+      release-note-none-launchbox-plugin-nuget-minor-and-patch:
         applies-to: version-updates
         patterns:
           - "*"
         update-types:
           - minor
           - patch
-      launchbox-plugin-nuget-security:
+      release-note-none-launchbox-plugin-nuget-security:
         applies-to: security-updates
         patterns:
           - "*"
@@ -73,14 +73,14 @@ updates:
       timezone: America/Regina
     open-pull-requests-limit: 5
     groups:
-      docker-minor-and-patch:
+      release-note-none-docker-minor-and-patch:
         applies-to: version-updates
         patterns:
           - "*"
         update-types:
           - minor
           - patch
-      docker-security:
+      release-note-none-docker-security:
         applies-to: security-updates
         patterns:
           - "*"
@@ -94,14 +94,14 @@ updates:
       timezone: America/Regina
     open-pull-requests-limit: 5
     groups:
-      compose-minor-and-patch:
+      release-note-none-compose-minor-and-patch:
         applies-to: version-updates
         patterns:
           - "*"
         update-types:
           - minor
           - patch
-      compose-security:
+      release-note-none-compose-security:
         applies-to: security-updates
         patterns:
           - "*"
@@ -115,14 +115,14 @@ updates:
       timezone: America/Regina
     open-pull-requests-limit: 10
     groups:
-      actions-minor-and-patch:
+      release-note-none-actions-minor-and-patch:
         applies-to: version-updates
         patterns:
           - "*"
         update-types:
           - minor
           - patch
-      actions-security:
+      release-note-none-actions-security:
         applies-to: security-updates
         patterns:
           - "*"

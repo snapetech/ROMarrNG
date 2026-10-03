@@ -48,6 +48,18 @@ ram.runtime = "512M"
     sha256 = "4a5bc0b07df8d1a51bf704396b5fa8fabf37c0c2a0be8d0a858c35003a7f1d64"
     autoupdate.strategy = "latest_github_tag"
 
+    [resources.sources.uv]
+    in_subdir = true
+    format = "tar.gz"
+    amd64.url = "https://github.com/astral-sh/uv/releases/download/0.12.18/uv-x86_64-unknown-linux-gnu.tar.gz"
+    amd64.sha256 = "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16"
+    arm64.url = "https://github.com/astral-sh/uv/releases/download/0.12.18/uv-aarch64-unknown-linux-gnu.tar.gz"
+    arm64.sha256 = "afb6291f3f0a6b4521fc67b947822506c41dde5b60d2189dd8f3695b2ac8c9e7"
+    autoupdate.upstream = "https://github.com/astral-sh/uv"
+    autoupdate.strategy = "latest_github_release"
+    autoupdate.asset.amd64 = "^uv-x86_64-unknown-linux-gnu\\.tar\\.gz$"
+    autoupdate.asset.arm64 = "^uv-aarch64-unknown-linux-gnu\\.tar\\.gz$"
+
   [resources.system_user]
 
   [resources.install_dir]
@@ -63,4 +75,4 @@ ram.runtime = "512M"
   main.default = 6868
 
   [resources.apt]
-    packages = "git, libarchive-tools, libseccomp2, python3-venv, rsync"
+    packages = "git, libarchive-tools, libseccomp2, rsync"

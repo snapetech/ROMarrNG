@@ -1,27 +1,29 @@
 <?xml version="1.0"?>
+<!-- Alternative image for Headless Browser downloads. Use instead of the
+     standard ROMarrNG template; both use the same appdata and web port. -->
 <Container version="2">
-  <Name>ROMarrNG</Name>
-  <Repository>ghcr.io/snapetech/romarrng:latest</Repository>
+  <Name>ROMarrNG-Browser</Name>
+  <Repository>ghcr.io/snapetech/romarrng:browser</Repository>
   <Registry>https://ghcr.io/snapetech/romarrng</Registry>
   <Network>bridge</Network>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
   <Icon>https://raw.githubusercontent.com/snapetech/ROMarrNG/main/packaging/unraid/icon.png?version=0.11.1-ng-badge</Icon>
   <WebUI>http://[IP]:[PORT:6868]/</WebUI>
-  <Overview>Standalone NG fork of ROMarr for retro and recent-console discovery and acquisition, with optional SeerrNG integration.</Overview>
-  <Description>ROMarrNG is a complete standalone ROM manager; SeerrNG is optional. This Snapetech NG fork includes SeerrNG request and library APIs. The default folder library uses the mapped /roms path and needs no separate library server. Open ROMarrNG to set its password, indexers, and download client, then configure its API key in SeerrNG if desired. For Playwright-backed Headless Browser downloads, use the separate ROMarrNG-Browser template instead.</Description>
+  <Overview>Alternative ROMarrNG image with the Playwright client for browser-based downloads. Requires a separate, version-matched Playwright browser server. Use instead of the standard ROMarrNG container.</Overview>
+  <Description>ROMarrNG Browser is the Debian image variant for the optional Headless Browser download client. It contains the Playwright Python client but no Chromium. Run a separate Playwright server and set Browser Host in Download Clients. This template shares the standard template's appdata and web port; do not run both containers at once.</Description>
   <Support>https://github.com/snapetech/seerrng/issues</Support>
   <Project>https://github.com/snapetech/ROMarrNG</Project>
-  <TemplateURL>https://raw.githubusercontent.com/snapetech/ROMarrNG/main/packaging/unraid/romarrng.xml</TemplateURL>
-  <ReadMe>https://github.com/snapetech/ROMarrNG/blob/main/README.md</ReadMe>
+  <TemplateURL>https://raw.githubusercontent.com/snapetech/ROMarrNG/main/packaging/unraid/romarrng-browser.xml</TemplateURL>
+  <ReadMe>https://github.com/snapetech/ROMarrNG/blob/main/README.md#downloading-from-a-rom-site</ReadMe>
   <Category>MediaApp:Other</Category>
-  <ExtraSearchTerms>romarrng romarr rom emulation game seerrng ps4 ps5 vita xbox</ExtraSearchTerms>
-  <Changes>Recent-console packages and complete folder dumps, with streamed archive downloads and optional SeerrNG integration. Use the ROMarrNG-Browser template for the optional Playwright download client. The Community Apps template refreshes its ROMarrNG icon. Acquisition support does not establish emulator compatibility.</Changes>
-  <Requires>Docker and persistent appdata. Configure this app independently before connecting it to SeerrNG.</Requires>
+  <ExtraSearchTerms>romarrng romarr browser playwright rom emulation game seerrng</ExtraSearchTerms>
+  <Changes>Debian image variant with the matching Playwright client. Chromium runs in a separate browser server; direct download support is unchanged.</Changes>
+  <Requires>Docker, persistent appdata, and a separate Playwright server for Headless Browser downloads.</Requires>
   <ExtraParams>--restart=unless-stopped</ExtraParams>
 
   <Config Name="Web UI Port" Target="6868" Default="6868" Mode="tcp" Description="Web UI Port for the standalone web interface." Type="Port" Display="always" Required="false" Mask="false">6868</Config>
-  <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/romarrng" Mode="rw" Description="Persistent ROMarrNG settings and database." Type="Path" Display="always" Required="false" Mask="false">/mnt/user/appdata/romarrng</Config>
+  <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/romarrng" Mode="rw" Description="Persistent ROMarrNG settings and database; shared with the standard template." Type="Path" Display="always" Required="false" Mask="false">/mnt/user/appdata/romarrng</Config>
   <Config Name="ROM Library" Target="/roms" Default="/mnt/user/media/roms" Mode="rw" Description="ROM library root." Type="Path" Display="always" Required="false" Mask="false">/mnt/user/media/roms</Config>
   <Config Name="Downloads" Target="/downloads" Default="/mnt/user/downloads" Mode="rw" Description="Downloads shared with the configured download client." Type="Path" Display="always" Required="false" Mask="false">/mnt/user/downloads</Config>
   <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID for files created by this service." Type="Variable" Display="always" Required="false" Mask="false">99</Config>

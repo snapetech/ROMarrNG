@@ -17,6 +17,7 @@ fi
 ynh_config_remove_systemd
 ynh_config_remove_nginx
 ynh_config_remove_logrotate
+rm -rf -- "/opt/yunohost/$app/uv" "/opt/yunohost/$app/uv-python"
 
 #=================================================
 # END OF SCRIPT

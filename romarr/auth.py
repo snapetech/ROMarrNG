@@ -69,9 +69,11 @@ class Auth:
     """The gate. Holds no state a request can change."""
 
     def __init__(self, api_key: str = "", password_hash: str = "",
+                 integration_key: str = "",
                  enabled: bool = True,
                  session_seconds: int = SESSION_SECONDS):
         self.api_key = api_key or ""
+        self.integration_key = integration_key or ""
         self.password_hash = password_hash or ""
         self.enabled = enabled
         self.session_seconds = session_seconds
@@ -89,6 +91,20 @@ class Auth:
         if not self.api_key or not presented:
             return False
         return hmac.compare_digest(str(presented), self.api_key)
+
+    def check_integration_key(self, headers) -> bool:
+        """Whether a header carries the key limited to the provider API.
+
+        It intentionally has no query-string form. SeerrNG can send headers,
+        and credentials in request targets are routinely copied into proxy and
+        access logs.
+        """
+        if not self.integration_key:
+            return False
+        presented = (_header(headers, "X-Api-Key")
+                     or _bearer(_header(headers, "Authorization")))
+        return bool(presented) and hmac.compare_digest(
+            str(presented), self.integration_key)
 
     def hash_password(self, password: str) -> str:
         """`scrypt$<salt>$<digest>`, salted per call."""

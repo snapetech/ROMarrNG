@@ -61,6 +61,14 @@ def test_a_bearer_token_is_accepted():
                            cookies={})
 
 
+def test_scoped_integration_key_only_uses_a_header_credential():
+    auth = Auth(api_key="admin", integration_key="provider")
+    assert auth.check_integration_key({"X-Api-Key": "provider"})
+    assert auth.check_integration_key({"Authorization": "Bearer provider"})
+    assert not auth.check_integration_key({"X-Api-Key": "admin"})
+    assert not auth.check_integration_key({})
+
+
 def test_the_query_string_is_accepted_because_some_senders_cannot_set_headers():
     """The inbound request webhook is the case.
 

@@ -147,6 +147,11 @@ class SeerrRequest:
     status: str = "accepted"
     error: str = ""
     updated_at: str = field(default_factory=now_iso)
+    # Kept when reading the generic integration schema used by upstream
+    # ROMarr. The richer ROMarrNG API still derives verified assets from the
+    # import queue before exposing or streaming them.
+    created_at: str = field(default_factory=now_iso)
+    assets: list[str] = field(default_factory=list)
 
 
 # Defaults are spelled out here rather than scattered through the UI so a fresh
@@ -314,6 +319,7 @@ class Store:
             # parse, so no version of this file can be handed back.
             log.warning("could not read %s (%s); starting from defaults", self.path, err)
             return
+        migrated_integration_requests = False
         with self._lock:
             # Merged rather than replaced, so a setting added in a later
             # version has its default instead of being absent.
@@ -324,7 +330,62 @@ class Store:
             # simply an empty queue -- the same thing those installs had after
             # every restart anyway.
             self.queue = _rows(raw.get("queue"), QueueItem)
-            self.seerr_requests = _rows(raw.get("seerr_requests"), SeerrRequest)
+            requests_by_id = {
+                row.external_request_id: row
+                for row in _rows(raw.get("seerr_requests"), SeerrRequest)
+            }
+            legacy_requests = self.settings.get("integration_requests")
+            if isinstance(legacy_requests, list):
+                # Upstream ROMarr 1.0 stored these rows inside settings under
+                # `integration_requests`; ROMarrNG stores them at the top
+                # level. Import them before dropping the legacy setting so an
+                # existing install keeps its request and resume state.
+                for item in legacy_requests:
+                    if not isinstance(item, dict):
+                        continue
+                    external_id = str(
+                        item.get("id") or item.get("external_request_id") or ""
+                    ).strip()
+                    platform = str(item.get("platform") or "").strip()
+                    game = str(item.get("game") or item.get("name") or "").strip()
+                    if not external_id or not platform or not game:
+                        continue
+                    updated_at = str(item.get("updated_at")
+                                     or item.get("created_at") or now_iso())
+                    status = str(item.get("status") or "accepted")
+                    if status in ("accepted", "requested"):
+                        status = "searching"
+                    try:
+                        catalog_id = int(item.get("catalog_id") or 0)
+                        platform_id = int(item.get("platform_id") or 0)
+                    except (TypeError, ValueError):
+                        catalog_id = platform_id = 0
+                    assets = item.get("assets")
+                    migrated = SeerrRequest(
+                        external_request_id=external_id,
+                        game=game,
+                        platform=platform,
+                        catalog_provider=str(item.get("catalog_provider") or ""),
+                        catalog_id=catalog_id,
+                        platform_id=platform_id,
+                        status=status,
+                        error=str(item.get("error") or ""),
+                        updated_at=updated_at,
+                        created_at=str(item.get("created_at") or updated_at),
+                        assets=([str(path) for path in assets
+                                 if isinstance(path, str)]
+                                if isinstance(assets, list) else []),
+                    )
+                    current = requests_by_id.get(external_id)
+                    if current is None or migrated.updated_at > current.updated_at:
+                        requests_by_id[external_id] = migrated
+                self.settings.pop("integration_requests", None)
+                migrated_integration_requests = True
+            self.seerr_requests = list(requests_by_id.values())
+        if migrated_integration_requests:
+            # Persist the converted rows once, atomically, so later starts no
+            # longer depend on the legacy settings representation.
+            self.save()
 
     def save(self) -> None:
         with self._lock:
@@ -335,20 +396,23 @@ class Store:
                 "queue": [asdict(q) for q in self.queue[-self.MAX_QUEUE:]],
                 "seerr_requests": [asdict(row) for row in self.seerr_requests],
             }
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        # Atomic: a crash mid-write would otherwise leave truncated JSON and
-        # the service would refuse to start.
-        fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), prefix=".romarr-", suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(payload, fh, indent=1)
-            os.replace(tmp, self.path)
-        except OSError as err:
-            log.warning("could not write %s: %s", self.path, err)
+            # Keep the lock through replace as well as snapshotting. Two
+            # concurrent saves used to be able to write snapshots in order A,
+            # B and replace in order B, A, leaving the state file older than
+            # the in-memory state even though both writes were atomic.
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(
+                dir=str(self.path.parent), prefix=".romarr-", suffix=".tmp")
             try:
-                os.unlink(tmp)
-            except OSError:
-                pass
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    json.dump(payload, fh, indent=1)
+                os.replace(tmp, self.path)
+            except OSError as err:
+                log.warning("could not write %s: %s", self.path, err)
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
 
     # -- history -----------------------------------------------------------
 
@@ -465,6 +529,20 @@ class Store:
                 None,
             )
 
+    def list_seerr_requests(self) -> list[SeerrRequest]:
+        """Snapshot the durable external requests for the integration API."""
+        with self._lock:
+            return list(self.seerr_requests)
+
+    def latest_seerr_request(self) -> SeerrRequest | None:
+        """Return the most recently updated integration request, if any."""
+        with self._lock:
+            return max(
+                self.seerr_requests,
+                key=lambda row: (row.updated_at, row.external_request_id),
+                default=None,
+            )
+
     def put_seerr_request(self, row: SeerrRequest) -> SeerrRequest:
         with self._lock:
             for index, current in enumerate(self.seerr_requests):
@@ -492,6 +570,41 @@ class Store:
                 self.seerr_requests = retained
         self.save()
         return row
+
+    def put_seerr_request_if_absent(
+        self, row: SeerrRequest
+    ) -> tuple[SeerrRequest, bool]:
+        """Insert one external identity once, returning the stored row.
+
+        The read and insert share the store lock, so simultaneous retries
+        cannot replace a live row or launch a second acquisition.
+        """
+        with self._lock:
+            current = next(
+                (item for item in self.seerr_requests
+                 if item.external_request_id == row.external_request_id),
+                None,
+            )
+            if current is not None:
+                return current, False
+            self.seerr_requests.append(row)
+            if len(self.seerr_requests) > self.MAX_SEERR_REQUESTS:
+                excess = len(self.seerr_requests) - self.MAX_SEERR_REQUESTS
+                terminal = {"available", "failed", "cancelled"}
+                retention_cutoff = (
+                    datetime.now(timezone.utc) - timedelta(days=90)
+                ).isoformat(timespec="seconds")
+                retained = []
+                for current in self.seerr_requests:
+                    if (excess and current is not row
+                            and current.status in terminal
+                            and current.updated_at < retention_cutoff):
+                        excess -= 1
+                        continue
+                    retained.append(current)
+                self.seerr_requests = retained
+        self.save()
+        return row, True
 
     def update_seerr_request(self, external_request_id: str, *, status: str,
                               error: str = "",
@@ -566,10 +679,22 @@ class Store:
         return "cancelled"
 
     def recover_seerr_dispatches(self) -> None:
-        """Reconcile a process interruption during download-client handoff."""
+        """Make interrupted work safe and retryable after a process restart."""
         changed = False
         with self._lock:
             for request in self.seerr_requests:
+                if request.status == "searching":
+                    # No downloader handoff was recorded. Do not silently
+                    # launch another acquisition during startup; surface a
+                    # retryable state to SeerrNG instead.
+                    request.status = "failed"
+                    request.error = (
+                        "The server restarted while searching. Retry this "
+                        "request to resume it."
+                    )
+                    request.updated_at = now_iso()
+                    changed = True
+                    continue
                 if request.status != "dispatching":
                     continue
                 rows = [

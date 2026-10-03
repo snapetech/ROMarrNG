@@ -11,9 +11,11 @@ import json
 import io
 import tarfile
 import logging
+import socket
 import threading
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from http.server import ThreadingHTTPServer
 
 import pytest
@@ -87,6 +89,41 @@ def test_a_wrong_key_is_refused(server):
     assert code == 401
 
 
+def test_internal_exception_details_are_not_returned_or_logged(server, caplog):
+    base, service = server
+    secret = "client-key-must-not-escape"
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError(f"downstream URL contained {secret}")
+
+    service.search = fail
+    code, body, _ = get(base + "/api/v1/search?game=Example", key="testkey")
+    assert code == 500
+    assert json.loads(body) == {"error": "internal server error"}
+    assert secret not in caplog.text
+
+
+def test_secure_cookie_flag_can_be_enabled_for_https_deployments(tmp_path):
+    service = ROMarr({
+        "ROMARR_DATA": str(tmp_path / "secure-cookie.json"),
+        "ROMARR_API_KEY": "testkey",
+        "ROMARR_COOKIE_SECURE": "1",
+    })
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(service))
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        _, _, headers = get(
+            f"http://127.0.0.1:{httpd.server_address[1]}/api/v1/login",
+            method="POST", body={"apikey": "testkey"})
+        cookie = headers["Set-Cookie"]
+        assert "HttpOnly" in cookie and "SameSite=Strict" in cookie
+        assert "Secure" in cookie
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
 def test_seerrng_library_lookup_is_bounded_and_distinguishes_partial_cache(server):
     base, service = server
     route = base + "/api/v1/integration/library/lookup"
@@ -107,6 +144,136 @@ def test_seerrng_library_lookup_is_bounded_and_distinguishes_partial_cache(serve
     code, _, _ = get(route, key="testkey", method="POST",
                      body={"titles": [{"title": "x", "platform": "invalid"}]})
     assert code == 400
+
+
+def test_seerrng_scoped_key_cannot_read_the_admin_api(server):
+    base, service = server
+    key = service.auth.integration_key
+    for path in ("/api/integration/seerrng/v1/ping",
+                 "/api/v1/integration/ping"):
+        assert get(base + path, key=key)[0] == 200
+    assert get(base + "/api/v1/system/status", key=key)[0] == 401
+    assert get(base + "/api/v1/system/status", key="testkey")[0] == 200
+    assert get(base + "/api/v1/integration/ping?apikey=" + key)[0] == 401
+
+
+def test_seerrng_key_can_be_revealed_and_rotated_by_the_operator(server):
+    base, service = server
+    old = service.auth.integration_key
+    code, body, _ = get(base + "/api/v1/system/seerrng-key", key="testkey")
+    assert code == 200
+    assert json.loads(body)["api_key"] == old
+    code, body, _ = get(base + "/api/v1/system/seerrng-key/rotate",
+                        key="testkey", method="POST", body={})
+    new = json.loads(body)["api_key"]
+    assert code == 200 and new != old
+    assert get(base + "/api/v1/integration/ping", key=old)[0] == 401
+    assert get(base + "/api/v1/integration/ping", key=new)[0] == 200
+
+
+def test_seerrng_request_admission_is_idempotent_under_concurrency(
+    server, monkeypatch
+):
+    base, service = server
+    monkeypatch.setattr(service, "library_view", lambda **_: {"items": []})
+    dispatched = []
+
+    def start(service, request):
+        dispatched.append(request.external_request_id)
+        service._seerr_dispatch_pool.release(request.external_request_id)
+
+    monkeypatch.setattr("romarr.app._start_seerr_dispatch", start)
+    url = base + "/api/integration/seerrng/v1/requests"
+    payload = {"externalRequestId": "seerrng:race:1",
+               "game": "Chrono Trigger", "platform": "snes"}
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        replies = list(pool.map(
+            lambda _: get(url, key=service.auth.integration_key,
+                          method="POST", body=payload), range(2)))
+    assert sorted(reply[0] for reply in replies) == [200, 202]
+    assert dispatched == ["seerrng:race:1"]
+    assert len(service.store.seerr_requests) == 1
+
+
+def test_seerrng_dispatch_limit_refuses_new_work_without_persisting_it(server):
+    base, service = server
+    busy = [f"already-running-{index}" for index in range(4)]
+    assert all(service._seerr_dispatch_pool.reserve(value) for value in busy)
+    try:
+        code, _, headers = get(
+            base + "/api/v1/integration/requests",
+            key=service.auth.integration_key,
+            method="POST",
+            body={"externalRequestId": "seerrng:busy:1",
+                  "game": "Chrono Trigger", "platform": "snes"},
+        )
+        assert code == 503
+        assert headers["Retry-After"] == "15"
+        assert service.store.get_seerr_request("seerrng:busy:1") is None
+    finally:
+        for value in busy:
+            service._seerr_dispatch_pool.release(value)
+
+
+def test_json_request_bodies_are_bounded_before_parsing(server):
+    base, _ = server
+    code, body, _ = get(
+        base + "/api/v1/integration/library/lookup",
+        key="testkey", method="POST",
+        body={"titles": [{"title": "x" * 70000, "platform": "snes"}]},
+    )
+    assert code == 413
+    assert json.loads(body)["error"] == "lookup body too large"
+
+    code, body, _ = get(
+        base + "/api/v1/config", key="testkey", method="PUT",
+        body={"oversized": "x" * (2 << 20)},
+    )
+    assert code == 413
+    assert json.loads(body)["error"] == "request body too large"
+
+
+@pytest.mark.parametrize("framing", [
+    b"Content-Length: nope\r\n",
+    b"Content-Length: 0\r\nContent-Length: 0\r\n",
+    b"Transfer-Encoding: identity\r\n",
+])
+def test_ambiguous_request_framing_closes_before_a_pipelined_request(
+    server, framing
+):
+    _, service = server
+    handler = make_handler(service)
+    handler.protocol_version = "HTTP/1.1"
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    followup = (
+        b"GET /api/v1/system/status HTTP/1.1\r\n"
+        b"Host: localhost\r\nX-Api-Key: testkey\r\n"
+        b"Connection: keep-alive\r\n\r\n"
+    )
+    request = (
+        b"PUT /api/v1/config HTTP/1.1\r\n"
+        b"Host: localhost\r\nX-Api-Key: testkey\r\n"
+        b"Connection: keep-alive\r\n" + framing + b"\r\n" + followup
+    )
+    try:
+        with socket.create_connection(httpd.server_address, timeout=3) as client:
+            client.settimeout(3)
+            client.sendall(request)
+            client.shutdown(socket.SHUT_WR)
+            chunks = []
+            while True:
+                chunk = client.recv(8192)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+        response = b"".join(chunks)
+        assert b"HTTP/1.1 400" in response
+        assert response.count(b"HTTP/1.1 ") == 1
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
 
 
 def test_writing_needs_a_key(server):
@@ -524,3 +691,40 @@ def test_complete_game_bundle_is_authenticated_and_request_scoped(server, tmp_pa
     assert headers["Content-Range"] == f"bytes 1024-2047/{len(body)}"
     assert get(download, key="testkey", byte_range=f"bytes={len(body)}-")[0] == 416
     assert get(download.replace("seerr-1", "seerr-2"), key="testkey")[0] == 404
+
+
+def test_generic_external_request_contract_coexists_with_seerrng(server):
+    base, service = server
+    dispatched = threading.Event()
+
+    def request(game, platform, external_request_id=""):
+        dispatched.set()
+        return {"ok": False, "error": "no usable release"}
+
+    service.request = request
+    code, raw, _ = get(
+        base + "/api/v1/integration/requests", key="testkey", method="POST",
+        body={"name": "Chrono Trigger", "platform": "snes"},
+    )
+    assert code == 202
+    created = json.loads(raw)
+    assert created["request_id"].startswith("ext:")
+    assert created["name"] == "Chrono Trigger"
+    assert created["platform"] == "snes"
+    assert dispatched.wait(2)
+
+    code, raw, _ = get(
+        base + "/api/v1/integration/requests/current", key="testkey")
+    assert code == 200
+    assert json.loads(raw)["request_id"] == created["request_id"]
+
+    code, raw, _ = get(
+        base + "/api/v1/integration/requests", key="testkey")
+    assert code == 200
+    assert json.loads(raw)["requests"][0]["request_id"] == created["request_id"]
+
+    code, raw, _ = get(base + "/api/v1/integration/info", key="testkey")
+    assert code == 200
+    info = json.loads(raw)
+    assert info["name"] == "ROMarrNG"
+    assert info["supports_resume"] is True

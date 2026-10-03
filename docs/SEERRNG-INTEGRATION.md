@@ -5,11 +5,26 @@ SeerrNG. SeerrNG owns catalog discovery, approval, and the user-facing request
 workflow; ROMarrNG searches configured sources, hands releases to a download
 client, imports files, and reports request status.
 
-All integration endpoints require ROMarrNG authentication. Call them from the
-SeerrNG server using `X-Api-Key` or `Authorization: Bearer`. Keep the ROMarrNG
-API key server-side. The canonical SeerrNG prefix is
-`/api/integration/seerrng/v1`. The legacy `/api/v1/integration` routes remain
-available for existing clients.
+Use the generated **SeerrNG provider key** from ROMarrNG's Settings → General
+page in SeerrNG's provider settings. It accepts `X-Api-Key` or
+`Authorization: Bearer` and is limited to the integration routes under either
+prefix. It cannot read settings or call the rest of ROMarrNG's admin API. The
+main API key continues to work for existing setups; rotate the provider key
+from the same page, or set `ROMARR_SEERRNG_API_KEY` to manage it in the
+environment. The provider key is never accepted in a query string.
+
+The canonical SeerrNG prefix is `/api/integration/seerrng/v1`. The legacy
+`/api/v1/integration` routes remain available for existing clients. SeerrNG
+checks `requestContractVersion` in the handshake, uses the legacy routes when
+an older ROMarrNG omits that field, and refuses contract versions it does not
+understand.
+
+Integration request bodies are limited to 64 KiB. ROMarrNG rate-limits
+integration calls to 120 requests per minute per client address. At most four
+SeerrNG acquisitions run at once; when full, a new request receives `503` and
+`Retry-After: 15` without creating a request row. Request creation and retry
+are idempotent under concurrent calls, so one external ID cannot launch two
+searches.
 
 ## Handshake and platforms
 
@@ -79,6 +94,11 @@ The first submission returns `202` while ROMarrNG processes the request. A
 repeat submission with the same ID returns the existing record only when its
 normalized title, ROMarrNG platform, and catalog identity match. Reusing an ID
 for another game or platform returns `409`.
+
+If ROMarrNG restarts while a request is still searching, it changes that row
+to `failed` so SeerrNG can offer a deliberate retry. If the process stopped
+during download-client handoff, the separate confirmation requirement below
+still applies because a transfer may already exist.
 
 `GET /api/v1/integration/requests/{externalRequestId}` returns status, title,
 platform, catalog identity when present, whether imported files can be

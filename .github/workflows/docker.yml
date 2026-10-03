@@ -12,7 +12,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 # A newer main push supersedes its old image; never let an older build
 # finish later and overwrite latest. Tag builds keep separate groups.
@@ -77,6 +76,12 @@ jobs:
     needs: [test, release-notes]
     if: always() && needs.test.result == 'success' && (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -170,6 +175,9 @@ jobs:
           chmod 0775 "$RUNNER_TEMP/romarr-downloads/source.rar"
           before=$(stat -c '%u:%g:%a' "$RUNNER_TEMP/romarr-downloads/source.rar")
           docker run -d --name smoke -p 6868:6868 \
+            --read-only --cap-drop ALL --cap-add CHOWN --cap-add SETGID \
+            --cap-add SETUID --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=256m \
             -e PUID=1000 -e PGID=1000 -e UMASK=002 \
             -v "$RUNNER_TEMP/romarr-config:/config" \
             -v "$RUNNER_TEMP/romarr-roms:/roms" \
@@ -220,6 +228,7 @@ jobs:
           docker rm -f smoke
 
       - name: Build and push
+        id: push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -231,12 +240,124 @@ jobs:
           cache-to: type=gha,mode=max
           # Provenance attestations add manifest entries that several self-host
           # UIs display as an "unknown/unknown" platform. The image is what is
-          # wanted here, not the attestation.
+          # wanted here, so the signed referrer is published separately below.
           provenance: false
+
+      - name: Generate image SBOM
+        if: github.event_name != 'pull_request'
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ steps.image.outputs.name }}@${{ steps.push.outputs.digest }}
+          format: spdx-json
+          output-file: ${{ runner.temp }}/romarrng-image.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Attest image provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest image SBOM
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: ${{ runner.temp }}/romarrng-image.spdx.json
+          push-to-registry: true
+
+  # Debian variant for the optional Playwright download client. Keep it on
+  # separate tags so the default Alpine image and `latest` remain unchanged.
+  image-browser:
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve this fork's image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.image.outputs.name }}
+          flavor: latest=false
+          labels: |
+            org.opencontainers.image.title=ROMarrNG (browser edition)
+            org.opencontainers.image.description=ROMarrNG on Debian with the Playwright client for the Headless Browser download client
+          tags: |
+            type=raw,value=browser,enable={{is_default_branch}}
+            type=semver,pattern={{version}}-browser
+            type=semver,pattern={{major}}.{{minor}}-browser
+
+      - name: Build and push browser edition
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile.browser
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=browser
+          cache-to: type=gha,scope=browser,mode=max
+          provenance: false
+
+      - name: Generate browser image SBOM
+        if: github.event_name != 'pull_request'
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ steps.image.outputs.name }}@${{ steps.push.outputs.digest }}
+          format: spdx-json
+          output-file: ${{ runner.temp }}/romarrng-browser-image.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Attest browser image provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest browser image SBOM
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: ${{ runner.temp }}/romarrng-browser-image.spdx.json
+          push-to-registry: true
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: image
+    needs: [image, image-browser]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -273,6 +394,7 @@ jobs:
           {
             echo ""
             echo "**Container image**: \`${IMAGE}:${VERSION}\`"
+            echo "- Browser edition: \`${IMAGE}:${VERSION}-browser\` (AMD64/ARM64; Playwright client only)"
             echo "- [GitHub Container Registry](https://github.com/${{ github.repository }}/pkgs/container/romarrng)"
             echo ""
             echo "Pull with: \`docker pull ${IMAGE}:${VERSION}\`."

@@ -23,6 +23,20 @@ services:
     image: ghcr.io/snapetech/romarrng:latest
     container_name: romarr
     restart: unless-stopped
+    # ROMarr writes state only to /config, ROMs to /roms, downloads to the
+    # mounted download path, and temporary extraction files to /tmp.
+    read_only: true
+    cap_drop:
+      - ALL
+    # The root entrypoint needs these only to own /config and switch to PUID:PGID.
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m
     ports:
       - "6868:6868"
     environment:
@@ -40,10 +54,14 @@ services:
       # password. Uncomment to claim the install before it ever serves a
       # request, so there is no unclaimed window at all.
       # ROMARR_PASSWORD: choose-something-long
+      # ROMARR_COOKIE_SECURE: "1" # only if every browser session uses HTTPS
       #
       # The key scripts and other *arrs use. Generated on first run and shown
       # under Settings -> General; set it here to pin it to your own value.
       # ROMARR_API_KEY:
+      # SeerrNG can use a narrower integration-only key. ROMarrNG generates
+      # and reveals one under Settings -> General; set this to manage it here.
+      # ROMARR_SEERRNG_API_KEY:
       #
       # Already behind an authenticating proxy? ROMARR_AUTH=forward keeps that
       # proxy as the authority and verifies requests came through it. See
@@ -99,6 +117,16 @@ services:
       # to report PS2, GameCube, Wii, Dreamcast and 3DS as playable instead of
       # download-only. Everything works without it, minus those routes.
       # STREAM_SERVER_URL: http://romm-stream:8090
+
+      # Sunshine only: trust a CA or pin its certificate before sending the
+      # admin credential. Use the explicit insecure option only on a trusted LAN.
+      # MOONLIGHT_TLS_CA_FILE: /config/sunshine-ca.pem
+      # MOONLIGHT_TLS_FINGERPRINT: ""
+      # MOONLIGHT_ALLOW_INSECURE_TLS: "1"
+
+      # ROM Hub plugin execution requires seccomp. This is a deliberate
+      # no-confinement escape hatch; leave it unset for normal operation.
+      # ROMARR_ALLOW_UNSANDBOXED_PLUGINS: "1"
 
       # Optional DAT directory. Loose .dat/.xml files AND the ZIP archives
       # No-Intro distributes are read. Mount the host directory below and

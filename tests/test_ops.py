@@ -122,6 +122,7 @@ def test_login_is_the_tightest_limit():
     ("/api/v1/search?q=x", "search"),
     ("/api/v1/release", "search"),
     ("/api/v1/queue", "download"),
+    ("/api/v1/integration/ping", "integration"),
     ("/api/v1/game", "general"),
 ])
 def test_paths_are_categorised(path, category):
@@ -140,6 +141,7 @@ SETTINGS = {
     "library_path": "/roms",
     "min_seeders": 2,
     "_api_key": "SUPERSECRET",
+    "_seerrng_api_key": "SEERRNGSECRET",
     "_totp_secret": "BASE32SECRET",
     "download_clients": [
         {"name": "qbit", "type": "qbittorrent", "password": "hunter2"},
@@ -153,7 +155,8 @@ def test_a_backup_carries_no_credentials_by_default():
     and committed to a private repo "just in case". Every one of those is a
     place a plaintext qBittorrent password should not be."""
     body = json.dumps(make_backup(SETTINGS))
-    for secret in ("SUPERSECRET", "hunter2", "IXKEY", "BASE32SECRET"):
+    for secret in ("SUPERSECRET", "SEERRNGSECRET", "hunter2", "IXKEY",
+                   "BASE32SECRET"):
         assert secret not in body, secret
 
 

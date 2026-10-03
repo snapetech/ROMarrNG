@@ -212,3 +212,32 @@ def test_an_unverified_import_is_still_an_import():
 
 def test_a_failure_carries_the_reason():
     assert "no seeders" in failed("X", "no seeders on a public tracker").text()
+
+
+def test_send_test_reports_delivery_for_an_unsaved_connection(monkeypatch):
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: True)
+    ok, message = notify.send_test({
+        "type": "discord", "url": "https://discord.com/api/webhooks/1/x"})
+    assert ok and message == "test notification delivered"
+
+
+def test_send_test_says_why_it_failed():
+    ok, message = notify.send_test({
+        "type": "webhook", "url": "http://127.0.0.1:9/hook"})
+    assert not ok
+    assert "reach" in message or "HTTP" in message
+
+
+def test_send_test_asks_for_a_required_url():
+    ok, message = notify.send_test({"type": "discord", "url": ""})
+    assert not ok and "URL" in message
+
+
+def test_send_test_rejects_an_unknown_type():
+    assert notify.send_test({"type": "carrier-pigeon"}) == (
+        False, "unknown connection type")
+
+
+def test_only_the_url_field_carries_the_provider_hint():
+    assert notify.FIELD_HELP["username"] != NOTIFIERS["discord"]["help"]
+    assert notify.FIELD_LABELS["url"] == "URL"

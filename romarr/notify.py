@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -45,6 +46,10 @@ ON_UPDATE = "update"
 EVENTS = (ON_GRAB, ON_IMPORT, ON_UPGRADE, ON_FAILURE, ON_BAD_DUMP, ON_UPDATE)
 
 TIMEOUT = 15
+
+# Each request thread keeps its own most recent delivery reason so the editor's
+# Test button can explain a failure without exposing webhook URLs or tokens.
+_last = threading.local()
 
 
 @dataclass
@@ -69,16 +74,25 @@ class Message:
 
 def _post(url: str, *, data: bytes | None = None, headers: dict | None = None,
           method: str = "POST") -> bool:
-    request = urllib.request.Request(url, data=data, method=method)
-    for name, value in (headers or {}).items():
-        request.add_header(name, value)
+    _last.reason = ""
     try:
+        request = urllib.request.Request(url, data=data, method=method)
+        for name, value in (headers or {}).items():
+            request.add_header(name, value)
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-            return 200 <= response.status < 300
+            if 200 <= response.status < 300:
+                return True
+            _last.reason = f"the endpoint answered HTTP {response.status}"
     except urllib.error.HTTPError as exc:
+        _last.reason = f"the endpoint answered HTTP {exc.code}"
         log.warning("notification to %s rejected: HTTP %s",
                     _safe(url), exc.code)
+    except ValueError as exc:
+        _last.reason = f"not a usable URL ({exc.__class__.__name__})"
+        log.warning("notification not sent: %s", _last.reason)
     except Exception as exc:                    # a down endpoint is routine
+        _last.reason = ("could not reach the endpoint "
+                        f"({exc.__class__.__name__})")
         log.warning("notification to %s failed: %s", _safe(url), exc)
     return False
 
@@ -199,6 +213,54 @@ NOTIFIERS: dict[str, dict] = {
                 "help": "An Apprise API server, which fans out to a hundred "
                         "more services."},
 }
+
+
+FIELD_LABELS = {
+    "url": "URL",
+    "chat_id": "Chat ID",
+    "urls": "Apprise URLs",
+}
+
+FIELD_HELP = {
+    "username": "Optional. Overrides the webhook's display name.",
+    "token": "The access token for this service.",
+    "priority": "Optional message priority.",
+    "chat_id": "The chat id to post into.",
+    "user": "Your user key.",
+    "urls": "Optional. Apprise URLs to notify, one per line or comma separated.",
+}
+
+
+def send_test(cfg: dict) -> tuple[bool, str]:
+    """Send one test message through one connection and explain the result."""
+    _last.reason = ""
+    spec = NOTIFIERS.get(str(cfg.get("type") or "").lower())
+    if spec is None:
+        return False, "unknown connection type"
+
+    needs = [field for field in spec["fields"] if field in ("url", "token")]
+    missing = [field for field in needs if not str(cfg.get(field) or "").strip()]
+    if missing:
+        labels = ", ".join(
+            FIELD_LABELS.get(field, field.replace("_", " ").title())
+            for field in missing
+        )
+        return False, f"missing required field: {labels}"
+
+    message = Message(
+        "grab", "ROMarr test notification",
+        body="If you can read this, the connection works.",
+        reasons=("+50 this is a test",),
+    )
+    try:
+        delivered = bool(spec["send"](cfg, message))
+    except Exception as exc:
+        log.warning("test notification through %s raised %s",
+                    spec["label"], exc.__class__.__name__)
+        return False, f"delivery raised {exc.__class__.__name__}"
+    if delivered:
+        return True, "test notification delivered"
+    return False, _last.reason or "delivery failed; check the connection settings"
 
 
 @dataclass

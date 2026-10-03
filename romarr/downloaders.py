@@ -3409,11 +3409,12 @@ CLIENT_TYPES = {
             FIELD("enable", "Enable", "bool", True),
             FIELD("save_path", "Save Path", default="/downloads/sites"),
             FIELD("host", "Browser Host",
-                  help="Blank launches Chromium here. For a browser in "
-                       "another container, run `playwright run-server "
-                       "--host 0.0.0.0 --port 3000` on it and set Scheme to "
-                       "ws -- the driver runs there and streams the finished "
-                       "file back, so the two need no shared directory."),
+                  help="Blank launches Chromium here when installed. In "
+                       "Docker or Unraid, use the ROMarrNG browser image and "
+                       "a matching Playwright run-server; enter that server's "
+                       "address, set Browser Port to 3000 and Scheme to ws. "
+                       "The driver streams the finished file back, so the "
+                       "containers need no shared download directory."),
             FIELD("port", "Browser Port", "int", 3000),
             FIELD("scheme", "Scheme", default="ws",
                   help="ws for a playwright run-server; http for a bare "

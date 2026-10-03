@@ -2767,6 +2767,15 @@ RENDER.general=()=>settingsPage('General',
     <div class="row" style="gap:8px;align-items:center;margin:8px 0">
       <button class="btn ghost" id="g-key" type="button">Reveal API key</button>
       <code id="g-keyout" style="font-size:12px;color:var(--dim)"></code></div>
+    <h3>SeerrNG provider key</h3>
+    <p class="help">Give this key to SeerrNG. It can use the SeerrNG
+      integration routes, while your main API key keeps full administrator
+      access.</p>
+    <div class="row" style="gap:8px;align-items:center;margin:8px 0">
+      <button class="btn ghost" id="g-seerrng-key" type="button">Reveal provider key</button>
+      <button class="btn ghost" id="g-seerrng-rotate" type="button">Rotate provider key</button>
+      <code id="g-seerrng-keyout" style="font-size:12px;color:var(--dim)"></code>
+    </div>
     <div class="row" style="gap:8px;align-items:center;margin:8px 0">
       <button class="btn ghost" id="g-totp" type="button">Enable two-factor (TOTP)</button>
       <button class="btn ghost" id="g-totpoff" type="button">Disable</button>
@@ -2777,6 +2786,20 @@ RENDER.general=()=>settingsPage('General',
     $('#g-key').onclick=async()=>{
       const d=await j('/api/v1/system/apikey').catch(()=>({}));
       $('#g-keyout').textContent=d.api_key||'could not read it';
+    };
+    $('#g-seerrng-key').onclick=async()=>{
+      const d=await j('/api/v1/system/seerrng-key').catch(()=>({}));
+      $('#g-seerrng-keyout').textContent=d.api_key||'could not read it';
+      if(d.managed_by_env) toast('This key is managed by ROMARR_SEERRNG_API_KEY');
+    };
+    $('#g-seerrng-rotate').onclick=async()=>{
+      if(!confirm('Rotate the SeerrNG provider key? SeerrNG will need the new key immediately.')) return;
+      const d=await j('/api/v1/system/seerrng-key/rotate',{method:'POST',
+        headers:{'content-type':'application/json'},body:'{}'}).catch(()=>({}));
+      if(d.api_key){
+        $('#g-seerrng-keyout').textContent=d.api_key;
+        toast('Provider key rotated');
+      }else toast(d.error||'Could not rotate provider key');
     };
     $('#g-totp').onclick=async()=>{
       if(!confirm('Enable two-factor sign-in? You will need a TOTP app '

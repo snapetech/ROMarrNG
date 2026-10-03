@@ -16,6 +16,7 @@ import csv
 import io
 import json
 import logging
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -159,6 +160,7 @@ DEFAULT_LIMITS = {
     "login": (5, 60),
     "search": (30, 60),
     "download": (60, 60),
+    "integration": (120, 60),
     "general": (300, 60),
 }
 
@@ -175,25 +177,45 @@ class RateLimiter:
         self.limits = dict(limits or DEFAULT_LIMITS)
         self._clock = clock
         self._hits: dict[tuple[str, str], deque] = {}
+        self._lock = threading.Lock()
+        self._max_callers = 10000
 
     def check(self, category: str, caller: str = "") -> tuple[bool, int]:
         """(allowed, seconds until it would be allowed)."""
         limit, window = self.limits.get(category, self.limits["general"])
         key = (category, caller or "")
         now = self._clock()
-        hits = self._hits.setdefault(key, deque())
-        while hits and now - hits[0] >= window:
-            hits.popleft()
-        if len(hits) >= limit:
-            return False, max(1, int(window - (now - hits[0])))
-        hits.append(now)
-        return True, 0
+        with self._lock:
+            hits = self._hits.setdefault(key, deque())
+            while hits and now - hits[0] >= window:
+                hits.popleft()
+            if len(hits) >= limit:
+                return False, max(1, int(window - (now - hits[0])))
+            hits.append(now)
+            if len(self._hits) > self._max_callers:
+                stale = [bucket for bucket, values in self._hits.items()
+                         if not values or now - values[-1] >= self.limits.get(
+                             bucket[0], self.limits["general"])[1]]
+                for bucket in stale:
+                    if len(self._hits) <= self._max_callers:
+                        break
+                    if bucket != key:
+                        self._hits.pop(bucket, None)
+                while len(self._hits) > self._max_callers:
+                    first = next(iter(self._hits))
+                    if first == key and len(self._hits) > 1:
+                        first = next(bucket for bucket in self._hits
+                                     if bucket != key)
+                    self._hits.pop(first, None)
+            return True, 0
 
     @staticmethod
     def category_for(path: str) -> str:
         path = str(path or "")
         if "/login" in path:
             return "login"
+        if "/integration/" in path:
+            return "integration"
         if "/search" in path or "/release" in path or "/candidates" in path:
             return "search"
         if "/grab" in path or "/download" in path or "/queue" in path:
@@ -210,7 +232,8 @@ class RateLimiter:
 #: is a place a plaintext qBittorrent password should not be, and a backup
 #: that silently carries credentials is worse than no backup because it is
 #: handled as though it were harmless.
-SECRET_KEYS = ("_api_key", "_password_hash", "_totp_secret", "_totp_backup")
+SECRET_KEYS = ("_api_key", "_seerrng_api_key", "_password_hash",
+               "_totp_secret", "_totp_backup")
 SECRET_FIELDS = ("password", "api_key", "passkey", "token", "secret")
 
 

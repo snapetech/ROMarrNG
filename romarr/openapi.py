@@ -44,6 +44,7 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
                             "origin and source."),
     "/api/v1/integration/ping": ("GET", "Authenticated version handshake for "
                                          "SeerrNG software requests."),
+    "/api/v1/integration/info": ("GET", "ROMarrNG service identity and external-platform capabilities."),
     "/api/integration/seerrng/v1/ping": ("GET", "Canonical version and capability handshake for SeerrNG software requests."),
     "/api/integration/seerrng/v1/catalog/platforms": ("GET", "IGDB catalog platforms with stable numeric IDs."),
     "/api/integration/seerrng/v1/catalog/search": ("GET", "Search the configured IGDB catalog."),
@@ -52,7 +53,7 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "/api/integration/seerrng/v1/catalog/popular-page": ("GET", "Popular IGDB titles with offset pagination and optional filters."),
     "/api/integration/seerrng/v1/catalog/games/{igdbId}": ("GET", "Read one IGDB title; an optional platformId returns its exact day-precision platform release date."),
     "/api/integration/seerrng/v1/library/lookup": ("POST", "Look up SeerrNG emulation requests against the local ROM library."),
-    "/api/integration/seerrng/v1/requests": ("POST", "Idempotently create a SeerrNG emulation request with its IGDB game and platform identity."),
+    "/api/integration/seerrng/v1/requests": ("POST", "Idempotently create a SeerrNG emulation request with its IGDB game and platform identity. Returns 503 with Retry-After when all four dispatch slots are busy."),
     "/api/integration/seerrng/v1/requests/{externalRequestId}": ("GET", "Read request status, stable catalog identity and available actions."),
     "/api/integration/seerrng/v1/requests/{externalRequestId}/retry": ("POST", "Retry a failed request when its advertised actions allow it."),
     "/api/integration/seerrng/v1/requests/{externalRequestId}/cancel": ("POST", "Cancel a request when its advertised actions allow it."),
@@ -74,8 +75,9 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
                                              "Returns readiness, partial-cache state, "
                                              "and exact matches without file paths."),
     "/api/v1/integration/requests": ("POST", "Create an idempotent SeerrNG "
-                                            "ROM request and start ROMarr's "
-                                            "normal indexer search."),
+                                            "ROM request or accept a generic "
+                                            "external-platform request."),
+    "/api/v1/integration/requests/current": ("GET", "Read the most recently updated external-platform request."),
     "/api/v1/integration/requests/{externalRequestId}": ("GET", "Read the "
                                                            "status of one "
                                                            "SeerrNG request."),
@@ -291,6 +293,8 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "/api/v1/system/apikey": ("GET", "The API key, for the Settings page. "
                                      "Authenticated, unlike safe_settings "
                                      "which exists to strip credentials."),
+    "/api/v1/system/seerrng-key": ("GET", "Reveal the SeerrNG integration-only key to the authenticated operator."),
+    "/api/v1/system/seerrng-key/rotate": ("POST", "Rotate the SeerrNG integration-only key. Unavailable when ROMARR_SEERRNG_API_KEY is set in the environment."),
     "/api/v1/totp/enroll": ("POST", "Generate a TOTP secret and backup "
                                     "codes; two-factor gates sign-in from "
                                     "then on."),
@@ -317,6 +321,7 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "/api/v1/openapi.json": ("GET", "This document."),
     "/api/v1/webhook/ggrequestz": ("POST", "Inbound request, GG Requestz shape."),
     "/api/search": ("GET", "Search every configured indexer."),
+    "/api/v1/search": ("GET", "Legacy versioned alias for searching configured indexers."),
     "/api/import": ("POST", "Import a finished download."),
     "/api/v1/command": ("POST", "Run a task: search, import or refresh."),
     "/api/v1/log": ("GET", "Recent log lines."),
@@ -424,6 +429,12 @@ def spec(version: str = "0.0.0", *, base_url: str = "") -> dict:
     paths: dict[str, dict] = {}
     for path in sorted(DESCRIPTIONS):
         method, summary = DESCRIPTIONS[path]
+        if path == "/api/v1/integration/requests":
+            paths[path] = {
+                **_operation(path, "GET", "List tracked external-platform requests."),
+                **_operation(path, method, summary),
+            }
+            continue
         paths[path] = _operation(path, method, summary)
 
     return {

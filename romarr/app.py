@@ -38,6 +38,7 @@ import mimetypes
 import os
 import pathlib
 import re
+import secrets as _secrets
 import tarfile
 import threading
 import unicodedata
@@ -64,7 +65,7 @@ from .downloaders import (
 )
 from .indexers import INDEXER_TYPES, build_indexer, redact_indexer
 from .indexers import Prowlarr, ProwlarrConfig
-from .library import import_rom, map_remote_path
+from .library import import_rom, map_remote_path, platform_dir
 from .game_assets import bundle_range, directory_asset, stream_directory
 from .collections import is_translation
 from .auth import DISABLED as AUTH_DISABLED
@@ -78,8 +79,8 @@ from .catalogue import (Submission, check_source, facets as hub_facets,
                         search as hub_search, submission_link)
 from .frontends import FORMATS as FRONTEND_FORMATS
 from .metadata import PROVIDERS as METADATA_PROVIDERS
-from .notify import (NOTIFIERS, Message, Notifier, failed, grabbed, imported,
-                     update_available)
+from .notify import (FIELD_HELP, FIELD_LABELS, NOTIFIERS, Message, Notifier,
+                     failed, grabbed, imported, send_test, update_available)
 from .profiles import Blocklist, ReleaseProfile, release_id
 from .upgrade import is_upgrade, merge_tags, scan as scan_directory
 from .metadata import (
@@ -112,6 +113,89 @@ from .ui import link_page as ui_link_page
 from .ui import login_page as ui_login_page
 
 log = logging.getLogger(__name__)
+
+
+class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    """Keep slow or bursty clients from creating an unbounded worker pool."""
+
+    daemon_threads = True
+    block_on_close = False
+    request_queue_size = 64
+    socket_timeout = 30
+
+    def __init__(self, *args, max_workers: int = 64, **kwargs):
+        self._worker_slots = threading.BoundedSemaphore(max_workers)
+        super().__init__(*args, **kwargs)
+
+    def get_request(self):
+        request, address = super().get_request()
+        request.settimeout(self.socket_timeout)
+        return request, address
+
+    def process_request(self, request, client_address):
+        if not self._worker_slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._worker_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._worker_slots.release()
+
+
+class SeerrDispatchPool:
+    """Bound the number of concurrent SeerrNG acquisition searches."""
+
+    def __init__(self, max_workers: int = 4):
+        self.max_workers = max_workers
+        self._lock = threading.Lock()
+        self._active: set[str] = set()
+
+    def reserve(self, external_request_id: str) -> bool:
+        """Reserve capacity before persisting a new or retried dispatch."""
+        with self._lock:
+            if (external_request_id in self._active
+                    or len(self._active) >= self.max_workers):
+                return False
+            self._active.add(external_request_id)
+            return True
+
+    def start_reserved(self, external_request_id: str, target) -> None:
+        """Start one reserved worker and release its slot on every exit."""
+        def run():
+            try:
+                target()
+            finally:
+                with self._lock:
+                    self._active.discard(external_request_id)
+
+        try:
+            threading.Thread(
+                target=run,
+                name=f"seerr-rom-request-{external_request_id[-12:]}",
+                daemon=True,
+            ).start()
+        except Exception:
+            with self._lock:
+                self._active.discard(external_request_id)
+            raise
+
+    def release(self, external_request_id: str) -> None:
+        with self._lock:
+            self._active.discard(external_request_id)
+
+
+def _is_seerr_integration_path(path: str) -> bool:
+    return any(
+        path == prefix or path.startswith(prefix + "/")
+        for prefix in ("/api/integration/seerrng/v1", "/api/v1/integration")
+    )
 
 VERSION = "0.12.3"
 
@@ -282,8 +366,13 @@ def _seerr_local_assets(service, request: SeerrRequest) -> list[dict]:
                if item.external_request_id == request.external_request_id]
     if related and related[-1].state == "import-failed":
         return []
-    imported_rows = [{"id": path} for item in related
-                     if item.state == "imported" for path in item.imported_paths]
+    imported_paths = (list(request.assets)
+                      if isinstance(request.assets, list) else [])
+    imported_paths.extend(
+        path for item in related if item.state == "imported"
+        for path in item.imported_paths
+    )
+    imported_rows = [{"id": path} for path in dict.fromkeys(imported_paths)]
     for row in imported_rows or _seerr_library_matches(service, request):
         source = Path(str(row.get("id") or ""))
         if not source.is_absolute():
@@ -353,6 +442,11 @@ def _seerr_request_view(service, request: SeerrRequest) -> dict:
             request.error = error or ""
     return {
         "externalRequestId": request.external_request_id,
+        # Generic external-platform clients use these stable, concise names;
+        # the SeerrNG contract fields below remain unchanged.
+        "request_id": request.external_request_id,
+        "name": request.game,
+        "assets": [str(asset["path"]) for asset in assets if asset.get("path")],
         "status": status,
         "deliverable": bool(assets),
         "error": error,
@@ -375,6 +469,19 @@ def _seerr_request_view(service, request: SeerrRequest) -> dict:
     }
 
 
+def _seerr_request_identity_matches(
+    row: SeerrRequest, game: str, platform: str,
+    catalog_provider: str, catalog_id: int, platform_id: int,
+) -> bool:
+    return (
+        _seerr_title_key(row.game) == _seerr_title_key(game)
+        and row.platform == platform
+        and row.catalog_provider == catalog_provider
+        and row.catalog_id == catalog_id
+        and row.platform_id == platform_id
+    )
+
+
 def _start_seerr_dispatch(service, request: SeerrRequest) -> None:
     """Run ROMarr's normal search without holding the SeerrNG HTTP request."""
     def dispatch() -> None:
@@ -385,7 +492,8 @@ def _start_seerr_dispatch(service, request: SeerrRequest) -> None:
                 external_request_id=request.external_request_id,
             )
         except Exception as err:  # noqa: BLE001 - reflected as a safe status
-            log.exception("SeerrNG request dispatch failed")
+            log.error("SeerrNG request dispatch failed (%s)",
+                      err.__class__.__name__)
             service.store.update_seerr_request(
                 request.external_request_id,
                 status="failed",
@@ -405,11 +513,8 @@ def _start_seerr_dispatch(service, request: SeerrRequest) -> None:
             only_if_not_cancelled=True,
         )
 
-    threading.Thread(
-        target=dispatch,
-        name=f"seerr-rom-request-{request.external_request_id[-12:]}",
-        daemon=True,
-    ).start()
+    service._seerr_dispatch_pool.start_reserved(
+        request.external_request_id, dispatch)
 
 
 # QueueItem is defined in .store, beside the other things that survive a
@@ -596,6 +701,8 @@ class ROMarr:
         # carrying Prowlarr's API key.
         self._candidates: dict[str, dict] = {}
         self._lock = threading.Lock()
+        self._seerr_request_lock = threading.Lock()
+        self._seerr_dispatch_pool = SeerrDispatchPool(max_workers=4)
         # Lets a configuration change wake the background refresh instead of
         # waiting out its interval. Created before reload_libraries, which sets
         # it.
@@ -661,6 +768,10 @@ class ROMarr:
             socket_path=e.get("WOLF_SOCKET_PATH", ""),
             api_url=e.get("WOLF_API_URL", ""),
             desktop_url=e.get("STEAM_HEADLESS_URL", ""),
+            tls_ca_file=e.get("MOONLIGHT_TLS_CA_FILE", ""),
+            tls_fingerprint=e.get("MOONLIGHT_TLS_FINGERPRINT", ""),
+            allow_insecure_tls=(
+                e.get("MOONLIGHT_ALLOW_INSECURE_TLS", "").strip() == "1"),
         ) if moonlight_host else None
 
         # Both stream tiers behind the single slot `routes_for` takes. The
@@ -712,9 +823,24 @@ class ROMarr:
                 # can rely on. Found on a live install whose store file was a
                 # week older than the running process.
                 self.store.save()
+
+        supplied_integration_key = e.get("ROMARR_SEERRNG_API_KEY", "")
+        integration_key = (supplied_integration_key
+                           or self.store.settings.get("_seerrng_api_key", ""))
+        integration_key_generated = not integration_key
+        if integration_key_generated:
+            integration_key = new_api_key()
+        if supplied_integration_key:
+            self.store.settings.pop("_seerrng_api_key", None)
+        else:
+            self.store.settings["_seerrng_api_key"] = integration_key
+            if integration_key_generated:
+                self.store.save()
+        self.seerrng_key_env_supplied = bool(supplied_integration_key)
         mode = e.get("ROMARR_AUTH", "").strip().lower()
         self.auth = Auth(
             api_key=api_key,
+            integration_key=integration_key,
             password_hash=self.store.settings.get("_password_hash", ""),
             enabled=mode != AUTH_DISABLED,
         )
@@ -1433,7 +1559,7 @@ class ROMarr:
         # here by name for the same reason as the two above: the underscore
         # is a naming convention, not a boundary, and `_romm_url` proves the
         # convention is not a reliable one to filter on.
-        for secret in ("_api_key", "_password_hash", "_peers"):
+        for secret in ("_api_key", "_seerrng_api_key", "_password_hash", "_peers"):
             out.pop(secret, None)
         return out
 
@@ -2608,7 +2734,9 @@ class ROMarr:
         listed = False
         if platform_slug:
             for cfg, _ in self.game_libraries:
-                folder = self.library_root(cfg) / platform_slug
+                folder = platform_dir(
+                    self.library_root(cfg), platform_slug,
+                    layout=self.library_layout(cfg))
                 try:
                     entries = list(folder.iterdir())
                 except OSError:
@@ -4737,9 +4865,14 @@ def make_handler(service: ROMarr):
             try:
                 return handler()
             except Exception as exc:
-                log.exception("%s %s failed", self.command,
-                              redact_query_credentials(self.path))
-                return self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+                # Exception strings often contain full downstream URLs, which
+                # can carry a client's API key. Keep the path redaction and
+                # exception class for diagnosis without logging or returning
+                # the credential-bearing detail.
+                log.error("%s %s failed (%s)", self.command,
+                          redact_query_credentials(self.path),
+                          type(exc).__name__)
+                return self._json(500, {"error": "internal server error"})
 
         #: Paths that answer without a credential, and nothing else.
         #:
@@ -4783,10 +4916,14 @@ def make_handler(service: ROMarr):
             """
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            secure_cookie = str(service._env.get(
+                "ROMARR_COOKIE_SECURE", "")).strip().lower() in ("1", "true", "yes")
+            secure_flag = "; Secure" if secure_cookie else ""
             self.send_header(
                 "Set-Cookie",
                 f"{SESSION_COOKIE}={token}; HttpOnly; SameSite=Strict; "
-                f"Path=/; Max-Age={service.auth.session_seconds}")
+                f"Path=/; Max-Age={service.auth.session_seconds}"
+                f"{secure_flag}")
             raw = json.dumps(payload).encode()
             self.send_header("Content-Length", str(len(raw)))
             self.end_headers()
@@ -4801,17 +4938,34 @@ def make_handler(service: ROMarr):
             be useful.
             """
             try:
-                length = int(self.headers.get("Content-Length") or 0)
-                if length > 0:
-                    self.rfile.read(length)
-            except (ValueError, OSError):
-                pass
+                length = self._content_length()
+            except ValueError:
+                # With ambiguous framing there is no safe way to know where
+                # this request ends and a pipelined one begins.
+                self.close_connection = True
+                return
+            if length:
+                self._discard(length)
 
         #: How much of an over-sized body is drained before the socket is
         #: simply closed. Generous, because draining costs one buffer rather
         #: than the whole body -- but not unbounded, or a caller declaring ten
         #: gigabytes holds a worker for as long as it cares to send them.
-        DISCARD_CEILING = 16 << 20
+        DISCARD_CEILING = 1 << 20
+
+        def _content_length(self) -> int:
+            """Accept one unambiguous Content-Length and no transfer coding."""
+            if self.headers.get_all("Transfer-Encoding"):
+                raise ValueError("transfer encoding is unsupported")
+            values = self.headers.get_all("Content-Length", [])
+            if len(values) > 1:
+                raise ValueError("multiple content lengths")
+            if not values:
+                return 0
+            value = values[0].strip()
+            if not value or not value.isascii() or not value.isdecimal():
+                raise ValueError("invalid content length")
+            return int(value)
 
         def _discard(self, length: int) -> None:
             """Throw a body away as it arrives, without ever holding it.
@@ -4823,19 +4977,77 @@ def make_handler(service: ROMarr):
             keeps none of it, so the memory cost is one buffer regardless.
             """
             remaining = min(max(length, 0), self.DISCARD_CEILING)
+            complete = True
             try:
                 while remaining > 0:
                     chunk = self.rfile.read(min(65536, remaining))
                     if not chunk:
+                        complete = False
                         break
                     remaining -= len(chunk)
             except (ValueError, OSError):
-                pass
-            if length > self.DISCARD_CEILING:
+                complete = False
+            if length > self.DISCARD_CEILING or not complete:
                 # More still coming than is worth waiting for. The reply is
                 # already on its way; the connection goes rather than the
                 # worker sitting through the rest.
                 self.close_connection = True
+
+        def _read_json_body(self, path: str):
+            """Read a small JSON object only after enforcing its route limit."""
+            def fail(code: int, payload: dict):
+                self._json(code, payload)
+                # _json writes the response and returns None. A distinct
+                # sentinel keeps callers from treating a rejected body as
+                # valid input and running the route anyway.
+                return None, True
+
+            try:
+                length = self._content_length()
+            except ValueError:
+                self.close_connection = True
+                return fail(400, {"error": "invalid content length"})
+
+            limit = 2 << 20
+            error = "request body too large"
+            if path == "/api/v1/integration/library/lookup":
+                limit, error = 65536, "lookup body too large"
+            elif _is_seerr_integration_path(path):
+                limit = 65536
+            elif path == "/api/v1/restore":
+                limit = 16 << 20
+            elif path == "/api/v1/capture":
+                limit, error = CAPTURE_MAX_BODY, "capture too large"
+            if length > limit:
+                self._discard(length)
+                return fail(413, {
+                    "error": error,
+                    "limit_bytes": limit,
+                })
+            try:
+                raw = self.rfile.read(length) if length else b"{}"
+            except OSError:
+                self.close_connection = True
+                return fail(400, {"error": "incomplete request body"})
+            if length and len(raw) != length:
+                self.close_connection = True
+                return fail(400, {"error": "incomplete request body"})
+            try:
+                body = json.loads(raw)
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                return fail(400, {"error": "invalid json"})
+            if not isinstance(body, dict):
+                return fail(400, {"error": "json object required"})
+            return body, None
+
+        def _json_retry_after(self, code: int, payload: dict, seconds: int):
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Retry-After", str(seconds))
+            raw = json.dumps(payload).encode()
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            return self.wfile.write(raw)
 
         def _authorised(self) -> bool:
             # Single sign-on first, when configured. `self.client_address` is
@@ -4883,7 +5095,9 @@ def make_handler(service: ROMarr):
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 return self.wfile.write(body)
-            if path in self.OPEN_PATHS or self._authorised():
+            if (path in self.OPEN_PATHS or self._authorised()
+                    or (_is_seerr_integration_path(path)
+                        and service.auth.check_integration_key(self.headers))):
                 return self._guard(handler)
             self._drain()
             return self._json(401, {
@@ -4958,6 +5172,38 @@ def make_handler(service: ROMarr):
                         "assetStreaming": True,
                     },
                 })
+            if route.path == "/api/v1/integration/info":
+                catalog = igdb_catalog_config(
+                    service.store.list_items("metadata_providers")) is not None
+                return self._json(200, {
+                    "name": "ROMarrNG",
+                    "version": VERSION,
+                    "description": "ROMarrNG game acquisition and library service",
+                    "supports_resume": True,
+                    "supports_multi_platform": True,
+                    "apiVersion": 1,
+                    "capabilities": {
+                        "catalog": catalog,
+                        "emulationAcquisition": True,
+                        "requestActions": {"retry": True, "cancel": True},
+                        "assetStreaming": True,
+                    },
+                })
+            if route.path == "/api/v1/integration/requests":
+                requests = sorted(
+                    service.store.list_seerr_requests(),
+                    key=lambda row: (row.updated_at, row.external_request_id),
+                    reverse=True,
+                )
+                return self._json(200, {
+                    "requests": [_seerr_request_view(service, row)
+                                 for row in requests],
+                })
+            if route.path == "/api/v1/integration/requests/current":
+                current = service.store.latest_seerr_request()
+                if current is None:
+                    return self._json(404, {"error": "no tracked requests"})
+                return self._json(200, _seerr_request_view(service, current))
             catalog_routes = {
                 "/api/v1/integration/catalog/platforms",
                 "/api/v1/integration/catalog/search",
@@ -5298,11 +5544,15 @@ def make_handler(service: ROMarr):
                             {"name": "enable", "label": "Enable",
                              "type": "bool", "default": True},
                         ] + [
-                            {"name": f, "label": f.replace("_", " ").title(),
+                            {"name": f,
+                             "label": FIELD_LABELS.get(
+                                 f, f.replace("_", " ").title()),
                              "type": ("secret" if f in ("url", "token",
                                                         "password", "key")
                                       else "text"),
-                             "default": "", "help": spec["help"]}
+                             "default": "",
+                             "help": (spec["help"] if f == "url" else
+                                      FIELD_HELP.get(f, ""))}
                             for f in spec["fields"]
                         ] + [
                             {"name": "events", "label": "Events", "type": "list",
@@ -5416,6 +5666,12 @@ def make_handler(service: ROMarr):
                 # Deliberately its own authenticated route rather than part
                 # of safe_settings, which exists to strip credentials.
                 return self._json(200, {"api_key": service.auth.api_key})
+            if route.path == "/api/v1/system/seerrng-key":
+                return self._json(200, {
+                    "api_key": service.auth.integration_key,
+                    "managed_by_env": service.seerrng_key_env_supplied,
+                    "scope": "SeerrNG integration API only",
+                })
             if route.path == "/api/v1/system/tasks":
                 return self._json(200, {"items": service.scheduler.status()})
             if route.path == "/api/v1/capture/status":
@@ -5589,7 +5845,7 @@ def make_handler(service: ROMarr):
                 return self._json(200, {"available": hub.available(),
                                         "sandboxed": confined,
                                         "sandbox_detail": why})
-            if route.path == "/api/search":
+            if route.path in ("/api/search", "/api/v1/search"):
                 game = (query.get("game") or [""])[0]
                 if not game:
                     return self._json(400, {"error": "game is required"})
@@ -5602,7 +5858,12 @@ def make_handler(service: ROMarr):
             if route.path == seerr_prefix or route.path.startswith(seerr_prefix + "/"):
                 route = route._replace(
                     path="/api/v1/integration" + route.path[len(seerr_prefix):])
-            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except (TypeError, ValueError):
+                return self._json(400, {"error": "invalid content length"})
+            if length < 0:
+                return self._json(400, {"error": "invalid content length"})
             if (route.path == "/api/v1/integration/library/lookup"
                     and length > 65536):
                 self._discard(length)
@@ -5634,10 +5895,9 @@ def make_handler(service: ROMarr):
                 self.send_header("Content-Length", str(len(refusal)))
                 self.end_headers()
                 return self.wfile.write(refusal)
-            try:
-                body = json.loads(self.rfile.read(length) or b"{}")
-            except json.JSONDecodeError:
-                return self._json(400, {"error": "invalid json"})
+            body, body_error = self._read_json_body(route.path)
+            if body_error is not None:
+                return body_error
 
             if route.path == "/api/v1/integration/library/lookup":
                 titles = body.get("titles") if isinstance(body, dict) else None
@@ -5659,8 +5919,17 @@ def make_handler(service: ROMarr):
             if route.path == "/api/v1/integration/requests":
                 if not isinstance(body, dict):
                     return self._json(400, {"error": "invalid request payload"})
-                external_id = str(body.get("externalRequestId") or "").strip()
-                game = str(body.get("game") or "").strip()
+                supplied_external_id = str(body.get("externalRequestId") or "").strip()
+                # Upstream ROMarr's generic integration contract uses
+                # {name, platform} and lets the server issue a polling id.
+                # The richer SeerrNG contract supplies externalRequestId and
+                # remains idempotent as before.
+                generic_request = not supplied_external_id and isinstance(
+                    body.get("name"), str)
+                external_id = (supplied_external_id or
+                               ("ext:" + _secrets.token_hex(16)
+                                if generic_request else ""))
+                game = str(body.get("game") or body.get("name") or "").strip()
                 requested_platform = str(body.get("platform") or "").strip()
                 platform = resolve(requested_platform)
                 if "identity" in body and not isinstance(body.get("identity"), dict):
@@ -5686,35 +5955,57 @@ def make_handler(service: ROMarr):
                         or not game or len(game) > 500 or platform is None):
                     return self._json(400, {
                         "error": "externalRequestId, game and a valid platform are required"})
-                existing = service.store.get_seerr_request(external_id)
-                if existing:
-                    same_identity = (
-                        existing.catalog_provider == catalog_provider
-                        and existing.catalog_id == (catalog_id or 0)
-                        and existing.platform_id == (platform_id or 0)
+                with service._seerr_request_lock:
+                    existing = service.store.get_seerr_request(external_id)
+                    if existing:
+                        if not _seerr_request_identity_matches(
+                            existing, game, platform.slug, catalog_provider,
+                            catalog_id or 0, platform_id or 0,
+                        ):
+                            return self._json(409, {
+                                "error": "externalRequestId is already bound to a different game or platform identity"})
+                        return self._json(200, _seerr_request_view(service, existing))
+                    row = SeerrRequest(
+                        external_request_id=external_id,
+                        game=game,
+                        platform=platform.slug,
+                        catalog_provider=catalog_provider,
+                        catalog_id=catalog_id or 0,
+                        platform_id=platform_id or 0,
+                        status="available" if _seerr_library_matches(
+                            service,
+                            SeerrRequest(external_id, game, platform.slug),
+                        ) else "searching",
                     )
-                    if (_seerr_title_key(existing.game) != _seerr_title_key(game)
-                            or existing.platform != platform.slug or not same_identity):
-                        return self._json(409, {
-                            "error": "externalRequestId is already bound to a different game or platform identity"})
-                    return self._json(200, _seerr_request_view(service, existing))
-                row = SeerrRequest(
-                    external_request_id=external_id,
-                    game=game,
-                    platform=platform.slug,
-                    catalog_provider=catalog_provider,
-                    catalog_id=catalog_id or 0,
-                    platform_id=platform_id or 0,
-                    status="available" if _seerr_library_matches(
-                        service,
-                        SeerrRequest(external_id, game, platform.slug),
-                    ) else "searching",
-                )
-                service.store.put_seerr_request(row)
-                if row.status != "available":
-                    _start_seerr_dispatch(service, row)
-                return self._json(202, _seerr_request_view(
-                    service, service.store.get_seerr_request(external_id)))
+                    reserved = row.status != "available"
+                    if (reserved and not service._seerr_dispatch_pool.reserve(
+                            external_id)):
+                        return self._json_retry_after(503, {
+                            "error": "ROMarr is at its SeerrNG dispatch limit; retry shortly"}, 15)
+                    stored, created = service.store.put_seerr_request_if_absent(row)
+                    if not created:
+                        if reserved:
+                            service._seerr_dispatch_pool.release(external_id)
+                        if not _seerr_request_identity_matches(
+                            stored, game, platform.slug, catalog_provider,
+                            catalog_id or 0, platform_id or 0,
+                        ):
+                            return self._json(409, {
+                                "error": "externalRequestId is already bound to a different game or platform identity"})
+                        return self._json(200, _seerr_request_view(service, stored))
+                    if reserved:
+                        try:
+                            _start_seerr_dispatch(service, stored)
+                        except Exception as err:  # thread creation can fail
+                            service._seerr_dispatch_pool.release(external_id)
+                            log.error("could not start SeerrNG dispatch (%s)",
+                                      err.__class__.__name__)
+                            stored = service.store.update_seerr_request(
+                                external_id,
+                                status="failed",
+                                error="ROMarr could not start this request. Retry it.",
+                            )
+                    return self._json(202, _seerr_request_view(service, stored))
 
             request_prefix = "/api/v1/integration/requests/"
             if route.path.startswith(request_prefix):
@@ -5727,28 +6018,42 @@ def make_handler(service: ROMarr):
                 if row is None:
                     return self._json(404, {"error": "request not found"})
                 if len(parts) == 2 and parts[1] == "retry":
-                    current = _seerr_request_view(service, row)
-                    if current["status"] == "cancelled":
-                        return self._json(409, {"error": "cancelled requests cannot be retried"})
-                    if not current["actions"]["retry"]:
-                        return self._json(409, {"error": "request is not retryable in its current state"})
-                    if current["status"] in ("searching", "downloading", "available"):
-                        return self._json(200, current)
-                    if (
-                        row.error.startswith("The server restarted during download handoff.")
-                        and not (
-                            isinstance(body, dict)
-                            and body.get("confirmNoExistingDownload") is True
-                        )
-                    ):
-                        return self._json(409, {
-                            "confirmationRequired": "confirmNoExistingDownload",
-                            "error": row.error,
-                        })
-                    service.store.update_seerr_request(external_id, status="searching")
-                    row = service.store.get_seerr_request(external_id)
-                    _start_seerr_dispatch(service, row)
-                    return self._json(202, _seerr_request_view(service, row))
+                    with service._seerr_request_lock:
+                        row = service.store.get_seerr_request(external_id)
+                        if row is None:
+                            return self._json(404, {"error": "request not found"})
+                        current = _seerr_request_view(service, row)
+                        if current["status"] == "cancelled":
+                            return self._json(409, {"error": "cancelled requests cannot be retried"})
+                        if not current["actions"]["retry"]:
+                            return self._json(409, {"error": "request is not retryable in its current state"})
+                        if current["status"] in ("searching", "downloading", "available"):
+                            return self._json(200, current)
+                        if (
+                            row.error.startswith("The server restarted during download handoff.")
+                            and body.get("confirmNoExistingDownload") is not True
+                        ):
+                            return self._json(409, {
+                                "confirmationRequired": "confirmNoExistingDownload",
+                                "error": row.error,
+                            })
+                        if not service._seerr_dispatch_pool.reserve(external_id):
+                            return self._json_retry_after(503, {
+                                "error": "ROMarr is at its SeerrNG dispatch limit; retry shortly"}, 15)
+                        row = service.store.update_seerr_request(
+                            external_id, status="searching")
+                        try:
+                            _start_seerr_dispatch(service, row)
+                        except Exception as err:  # thread creation can fail
+                            service._seerr_dispatch_pool.release(external_id)
+                            log.error("could not start SeerrNG retry (%s)",
+                                      err.__class__.__name__)
+                            row = service.store.update_seerr_request(
+                                external_id,
+                                status="failed",
+                                error="ROMarr could not start this request. Retry it.",
+                            )
+                        return self._json(202, _seerr_request_view(service, row))
                 if len(parts) == 2 and parts[1] == "cancel":
                     if not isinstance(body, dict):
                         return self._json(400, {"error": "invalid cancellation payload"})
@@ -6244,6 +6549,30 @@ def make_handler(service: ROMarr):
                                                           "required or wrong"})
                 token = service.auth.issue_session()
                 return self._send_session(token, {"ok": True})
+            if route.path == "/api/v1/system/seerrng-key/rotate":
+                if service.seerrng_key_env_supplied:
+                    return self._json(409, {
+                        "error": "ROMARR_SEERRNG_API_KEY is set; rotate it in the environment"})
+                integration_key = new_api_key()
+                service.store.settings["_seerrng_api_key"] = integration_key
+                service.auth.integration_key = integration_key
+                service.store.save()
+                return self._json(200, {"api_key": integration_key,
+                                        "rotated": True})
+            if route.path == "/api/v1/connection/test" and body.get("type"):
+                spec = NOTIFIERS.get(str(body.get("type")).lower())
+                if spec is None:
+                    return self._json(200, {"ok": False,
+                                            "message": "unknown connection type"})
+                cfg = dict(body)
+                if cfg.get("id"):
+                    old_cfg = service.store.get_item(
+                        "connections", str(cfg["id"])) or {}
+                    for key in ("url", "token", "password", "key"):
+                        if cfg.get(key, "") in ("********", ""):
+                            cfg[key] = old_cfg.get(key, "")
+                ok, detail = send_test(cfg)
+                return self._json(200, {"ok": ok, "message": detail})
             if route.path == "/api/v1/connection/test":
                 got = service.notify(Message(
                     "grab", "ROMarr test notification",
@@ -6391,15 +6720,9 @@ def make_handler(service: ROMarr):
                 # JSON body; a DELETE carrying one is unusual enough that
                 # refusing it would just be a papercut.
                 query = parse_qs(route.query)
-                body = {}
-                length = int(self.headers.get("Content-Length") or 0)
-                if length:
-                    try:
-                        body = json.loads(self.rfile.read(length) or b"{}")
-                    except (ValueError, TypeError):
-                        body = {}
-                if not isinstance(body, dict):
-                    body = {}
+                body, body_error = self._read_json_body(route.path)
+                if body_error is not None:
+                    return body_error
                 game = str(body.get("game")
                            or (query.get("game") or [""])[0]).strip()
                 platform = str(body.get("platform")
@@ -6455,11 +6778,9 @@ def make_handler(service: ROMarr):
 
         def _put(self):
             route = urlparse(self.path)
-            length = int(self.headers.get("Content-Length") or 0)
-            try:
-                body = json.loads(self.rfile.read(length) or b"{}")
-            except json.JSONDecodeError:
-                return self._json(400, {"error": "invalid json"})
+            body, body_error = self._read_json_body(route.path)
+            if body_error is not None:
+                return body_error
 
             if route.path == "/api/v1/config":
                 updated = service.store.update_settings(body)
@@ -6493,7 +6814,8 @@ def serve(port: int = 6868, env: dict[str, str] | None = None):
     e = env if env is not None else os.environ
     host = e.get("ROMARR_HOST", "0.0.0.0")
     service = ROMarr(env)
-    httpd = ThreadingHTTPServer((host, port), make_handler(service))
+    httpd = BoundedThreadingHTTPServer(
+        (host, port), make_handler(service), max_workers=64)
 
     # Native HTTPS, for installs with no reverse proxy in front. Both
     # variables or neither: half a cert is a typo, and refusing to boot over

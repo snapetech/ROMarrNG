@@ -1,6 +1,9 @@
 import json
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
-from romarr.store import DEFAULT_SETTINGS, Event, Store
+from romarr.store import DEFAULT_SETTINGS, Event, SeerrRequest, Store
 
 
 def test_history_and_settings_survive_a_restart(tmp_path):
@@ -267,6 +270,72 @@ def test_the_library_view_is_not_shadowed_by_the_library_path(tmp_path):
     assert view["loading"] is True
 
 
+def test_seerr_request_identity_is_inserted_once_under_concurrency(tmp_path):
+    store = Store(tmp_path / "requests.json")
+
+    def insert(title):
+        return store.put_seerr_request_if_absent(
+            SeerrRequest("same-id", title, "snes"))
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(insert, ["First title", "Other title"] * 4))
+    assert sum(created for _, created in results) == 1
+    stored = store.get_seerr_request("same-id")
+    assert stored is not None
+    assert all(row is stored for row, _ in results)
+    assert len(Store(store.path).seerr_requests) == 1
+
+
+def test_a_request_interrupted_while_searching_becomes_retryable(tmp_path):
+    store = Store(tmp_path / "requests.json")
+    store.put_seerr_request(SeerrRequest(
+        "searching-id", "Chrono Trigger", "snes", status="searching"))
+
+    store.recover_seerr_dispatches()
+
+    row = store.get_seerr_request("searching-id")
+    assert row.status == "failed"
+    assert "restarted while searching" in row.error
+
+
+def test_concurrent_store_saves_cannot_replace_newer_state_with_an_old_snapshot(
+    tmp_path, monkeypatch
+):
+    store = Store(tmp_path / "state.json")
+    entered = threading.Event()
+    continue_first = threading.Event()
+    original_replace = os.replace
+    first = True
+
+    def delayed_replace(source, destination):
+        nonlocal first
+        if first:
+            first = False
+            entered.set()
+            assert continue_first.wait(2)
+        original_replace(source, destination)
+
+    monkeypatch.setattr("romarr.store.os.replace", delayed_replace)
+    saving = threading.Thread(target=store.save)
+    saving.start()
+    assert entered.wait(2)
+
+    update_started = threading.Event()
+
+    def update():
+        update_started.set()
+        store.update_settings({"min_seeders": 99})
+
+    updating = threading.Thread(target=update)
+    updating.start()
+    assert update_started.wait(2)
+    continue_first.set()
+    saving.join(2)
+    updating.join(2)
+    assert not saving.is_alive() and not updating.is_alive()
+    assert Store(store.path).settings["min_seeders"] == 99
+
+
 # --- romm token expiry -------------------------------------------------------
 #
 # The token is short-lived. Caching it for the life of the process made the
@@ -400,3 +469,35 @@ def test_a_state_file_that_cannot_be_parsed_still_starts(tmp_path):
     path.write_text("{ this is not json", encoding="utf-8")
     s = Store(path)
     assert s.settings["min_seeders"] == DEFAULT_SETTINGS["min_seeders"]
+
+
+def test_upstream_integration_requests_migrate_without_losing_status_or_assets(tmp_path):
+    path = tmp_path / "romarr.json"
+    path.write_text(json.dumps({
+        "settings": {
+            "integration_requests": [{
+                "id": "cartridge-42",
+                "name": "Chrono Trigger",
+                "game": "Chrono Trigger",
+                "platform": "snes",
+                "status": "available",
+                "error": "",
+                "assets": ["/roms/snes/Chrono Trigger.sfc"],
+                "created_at": "2026-10-01T12:00:00+00:00",
+                "updated_at": "2026-10-02T12:00:00+00:00",
+            }],
+        },
+        "queue": [],
+    }), encoding="utf-8")
+
+    store = Store(path)
+
+    row = store.get_seerr_request("cartridge-42")
+    assert row is not None
+    assert (row.game, row.platform, row.status) == (
+        "Chrono Trigger", "snes", "available")
+    assert row.assets == ["/roms/snes/Chrono Trigger.sfc"]
+    assert store.latest_seerr_request() is row
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["seerr_requests"][0]["external_request_id"] == "cartridge-42"
+    assert "integration_requests" not in saved["settings"]

@@ -87,3 +87,24 @@ def test_an_empty_platform_directory_is_not_an_error(tmp_path):
     service, library = service_with(tmp_path)
     (library / "snes").mkdir()
     assert service._present_titles("snes") == {}
+
+
+def test_a_nested_library_is_read_from_its_roms_folder(tmp_path):
+    service, library = service_with(tmp_path)
+    service.game_libraries = [({"name": "L", "type": "folder",
+                                "path": str(library), "layout": "nested"},
+                               object())]
+    nested = library / "ps2" / "roms"
+    nested.mkdir(parents=True)
+    (nested / "Dark Cloud (Europe) (En,Fr,De,Es,It).iso").write_text("x")
+
+    assert set(service._present_titles("ps2")) == {
+        "Dark Cloud (Europe) (En,Fr,De,Es,It)"}
+
+
+def test_a_flat_library_still_reads_the_platform_folder(tmp_path):
+    service, library = service_with(tmp_path)
+    (library / "ps2").mkdir()
+    (library / "ps2" / "Manhunt (Europe).iso").write_text("x")
+
+    assert set(service._present_titles("ps2")) == {"Manhunt (Europe)"}

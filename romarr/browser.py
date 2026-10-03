@@ -122,12 +122,26 @@ def _playwright():
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as err:
+        if _is_musl():
+            raise Unavailable(
+                "Playwright cannot be installed in this Alpine (musl) image; "
+                "its Python wheels need glibc. Use the ROMarrNG browser image "
+                "ghcr.io/snapetech/romarrng:browser and point Browser Host at "
+                "a matching `playwright run-server`."
+            ) from err
         raise Unavailable(
             "the playwright driver is not installed -- `pip install "
             "playwright` and, for a browser on this host, `playwright "
             "install chromium`"
         ) from err
     return sync_playwright
+
+
+def _is_musl() -> bool:
+    """Whether this interpreter runs on musl libc, as in Alpine Linux."""
+    import glob
+    return bool(glob.glob("/lib/ld-musl-*")
+                or glob.glob("/usr/lib/ld-musl-*"))
 
 
 def split_control(url: str) -> tuple[str, str]:

@@ -63,17 +63,21 @@ install; the only way off is explicit.
 - Passwords are hashed with scrypt (N=2^14, r=8, p=1), never stored plaintext.
 - Browsers hold an HMAC-signed session cookie: `HttpOnly`, `SameSite=Strict`,
   `Path=/`. `SameSite=Strict` is what stands in for CSRF tokens — another site
-  cannot make an authenticated request even if it knows the URL.
-- The cookie is not `Secure`, because ROMarr is normally plain HTTP on a LAN
-  and a `Secure` cookie would never be stored. Put it behind TLS if it leaves
-  your network.
+  cannot make an authenticated request even if it knows the URL. Set
+  `ROMARR_COOKIE_SECURE=1` when every browser session uses HTTPS; leave it
+  unset only for direct plain-HTTP LAN access.
 - API clients present `X-Api-Key`, `Authorization: Bearer` or `?apikey=`. The
   query form exists for senders that cannot set headers; it will appear in
   proxy logs, so prefer a header.
+- SeerrNG has a separate generated provider key, shown under Settings →
+  General. It accepts header credentials on the integration API only. The
+  main key remains valid for compatibility and still grants administrator
+  access. The provider key is never accepted in a query string.
 - TOTP (RFC 6238) gates interactive sign-in. It deliberately does not gate the
   API key: a script cannot be prompted, and a key is already high-entropy.
-- Login is rate limited. Wrong credentials return `401` without revealing
-  which of password or key was wrong.
+- Login, search, download, SeerrNG integration, and general API calls have
+  separate per-address rate limits. Wrong login credentials return `401`
+  without revealing which of password or key was wrong.
 - A state file ROMarr cannot **read** stops it starting. This is an
   authentication property, not a housekeeping one, and it was got wrong: an
   unreadable `romarr.json` — the normal result of a root-owned file under a
@@ -234,12 +238,13 @@ controlled.
 
 - The config API masks every credential; a value is masked by field type, so a
   secret left behind after changing a provider's type is still masked.
-- Backups exclude secrets unless `?secrets=1` is passed explicitly.
-- The API key is stored under a leading underscore so it is structurally
-  outside what `safe_settings` will serialise, rather than relying on a
-  maintained list.
-- Credentials are not logged, including on failure paths.
-- Neither unauthenticated page ever contains the API key.
+- Backups exclude secrets unless `?secrets=1` is passed explicitly. This
+  includes both API keys.
+- The admin and SeerrNG keys are removed from `safe_settings`; neither
+  unauthenticated page contains either key.
+- Unexpected server errors return a generic response and log only the route
+  and exception class, not a downstream exception string that might contain a
+  credential-bearing URL.
 
 ## Plugins — read this before installing one
 
@@ -261,13 +266,12 @@ What that does **not** cover:
 - It can reach every host it declared. Read that list before installing; a
   search plugin asking for hosts unrelated to its source is the warning sign.
 
-**If the filter cannot be installed, ROMarr falls back to running plugins with
-no confinement at all and logs a warning saying so.** It previously set that
-opt-out unconditionally, which switched off a boundary that in fact worked —
-the only thing missing was `pyseccomp`. The fallback sets
-`ROM_HUB_ALLOW_UNSANDBOXED=1`, which ROM Hub documents as no confinement
-at all; ROMarr never sets it while the filter is available. Check the
-startup log to see which state your install is in.
+**If the filter cannot be installed, plugin operations stop.** ROMarr does not
+silently run third-party code without its network/exec boundary. An operator
+who accepts that risk can explicitly set
+`ROMARR_ALLOW_UNSANDBOXED_PLUGINS=1`; ROMarr then logs the choice and sets the
+Hub's `ROM_HUB_ALLOW_UNSANDBOXED=1` only for the plugin subprocess. The normal
+Docker images include the runtime dependencies needed for the filter.
 
 What *is* enforced:
 
@@ -300,24 +304,41 @@ Stated so nobody assumes otherwise:
 - **No multi-user model.** There is one operator. Forward auth can require a
   group, but ROMarr does not distinguish users or keep per-user permissions.
 - **No audit log of who did what**, because there is no "who".
-- **No rate limiting on the API generally** — only on login.
-- **The Sunshine admin credential travels over an unverified TLS
-  connection.** Sunshine generates its own certificate on first run and
-  nobody signs it, so ROMarr disables certificate verification to talk to
-  `https://<host>:47990` at all. That connection is encrypted and **not
-  authenticated**: anything already on the path between ROMarr and the host
-  can impersonate it and collect `MOONLIGHT_PASS`. There is no fix available
-  from ROMarr's side — pinning would need a certificate the operator has no
-  way to supply — so treat that credential as LAN-only, and give Sunshine an
-  admin password you do not use anywhere else. Wolf has no equivalent
-  exposure: its API is a UNIX socket, and ROMarr sends it no credential.
-- **Wolf's API is a full-privilege API and ROMarr does not narrow it.** Wolf's
-  own documentation says that through it "you can pair clients to the server,
-  execute arbitrary commands, and more". Setting `WOLF_SOCKET_PATH` or
-  `WOLF_API_URL` gives ROMarr — and anything that can reach ROMarr's own
-  process — that level of access to the host. ROMarr calls four read
-  endpoints and one pairing endpoint, but nothing structurally confines it to
-  those.
+- **Rate limits are local to one ROMarr process.** Login is limited to 5/min,
+  search to 30/min, download actions to 60/min, SeerrNG integration to 120/min,
+  and general API calls to 300/min per socket peer address. They are not a
+  distributed quota or a defense against a large network-level flood.
+- **Request workers and bodies are bounded.** The server accepts at most 64
+  concurrent HTTP workers and times out idle socket reads after 30 seconds.
+  JSON bodies are limited to 2 MiB, SeerrNG integration bodies to 64 KiB,
+  capture uploads to 1 MiB, and restore payloads to 16 MiB. Four SeerrNG
+  acquisitions may run at once; new work receives `503` plus `Retry-After`
+  when all slots are busy.
+- **The Sunshine admin API needs operator-supplied TLS trust.** Set
+  `MOONLIGHT_TLS_CA_FILE` to a CA bundle or `MOONLIGHT_TLS_FINGERPRINT` to a
+  SHA-256 certificate pin before ROMarr sends `MOONLIGHT_PASS`. A changed
+  certificate stops the request. `MOONLIGHT_ALLOW_INSECURE_TLS=1` is an
+  explicit compatibility override that disables peer verification; use it
+  only on a trusted LAN with a unique Sunshine password. To read a pin from
+  Sunshine's certificate, run
+  `openssl s_client -connect sunshine-host:47990 -servername sunshine-host </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256`
+  and set the output as `MOONLIGHT_TLS_FINGERPRINT`.
+- **Wolf's underlying API remains full privilege.** ROMarr's client now
+  allowlists four read endpoints and one pairing endpoint. A compromised
+  ROMarr process that can open the Wolf socket still has access to Wolf's full
+  API. Keep `WOLF_SOCKET_PATH` private to ROMarr or put `WOLF_API_URL` behind a
+  private proxy that allows only those methods and paths; do not expose Wolf's
+  API on a general network.
+- **The Docker Compose example hardens the container** with a read-only root
+  filesystem, `no-new-privileges`, all capabilities dropped except the three
+  needed by the root entrypoint to own `/config` and switch to `PUID:PGID`, and
+  a bounded no-exec `/tmp`. The mounted `/config`, ROM library and downloads
+  remain writable for their stated purposes. Other deployment methods need
+  equivalent settings applied by their operator.
+- **Published container images carry signed provenance and SPDX SBOM
+  attestations.** Verify an image with `gh attestation verify
+  oci://ghcr.io/snapetech/romarrng:latest -R snapetech/ROMarrNG`. Attestations
+  identify build origin and the SBOM; they do not prove the software is safe.
 - **DAT verification is an integrity check, not a security control.** It tells
   you a file matches a known-good dump. It is not malware scanning, and an
   UNKNOWN verdict means "not in your DAT", not "dangerous".

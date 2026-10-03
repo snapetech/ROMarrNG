@@ -19,7 +19,10 @@ the standalone `ghcr.io/snapetech/romarrng:latest` image. Map persistent
 appdata to `/config`, your game library to `/roms`, and completed downloads to
 `/downloads`. Open the web interface on port 6868 to set your password and
 configure indexers and a download client. Connect SeerrNG if you want its
-request and catalog integration. For package or integration support, use the
+request and catalog integration. Headless Browser downloads use the
+[ROMarrNG Browser template](packaging/unraid/romarrng-browser.xml) and a
+separate Playwright server; ordinary direct downloads need no extra container.
+For package or integration support, use the
 [SeerrNG issue tracker](https://github.com/snapetech/seerrng/issues).
 
 [ROM Hub](https://github.com/BlizzHacker/rom-hub) is ROMarr's plugin factory:
@@ -270,7 +273,9 @@ library root, and an existing ROM is never silently overwritten.
 ## SeerrNG software requests
 
 ROMarrNG exposes an authenticated integration contract for SeerrNG. Configure
-the SeerrNG integration API key in SeerrNG; requests then use ROMarrNG's normal
+the provider key shown under ROMarrNG *Settings → General* in SeerrNG. This
+generated key is limited to the integration API; the main API key still works
+for existing setups. Requests then use ROMarrNG's normal
 platform matching, Prowlarr/direct indexer search, download-client handoff,
 verification, and library import. The maintained container is
 `ghcr.io/snapetech/romarrng:latest`.
@@ -420,6 +425,12 @@ account access to your library and download folders. The app backup includes
 settings and plugins; ROM library files are excluded and should be backed up
 separately. See [the package guide](packaging/yunohost/doc/ADMIN.md).
 
+Every push to `main` syncs `packaging/yunohost` to the package repository's
+`testing` branch. The ROMarrNG repository needs a `YUNOHOST_REPO_TOKEN` Actions
+secret with write access to `YunoHost-Apps/romarrng_ynh`. The Docker workflow
+also rebuilds and publishes `ghcr.io/snapetech/romarrng:latest` from `main`
+after its checks pass.
+
 ### From source
 
 ```bash
@@ -493,6 +504,8 @@ sign-in screen — which is how you get back in if the password is lost: set
 |---|---|
 | `ROMARR_PASSWORD` | Claims the install at startup. No setup screen is shown. |
 | `ROMARR_API_KEY` | Pins the API key. Setting it also counts as claiming the install. |
+| `ROMARR_SEERRNG_API_KEY` | Optionally pins the SeerrNG integration-only key. |
+| `ROMARR_COOKIE_SECURE` | Set to `1` when every browser session uses HTTPS. |
 | `ROMARR_AUTH` | `forward` for SSO, or `disabled` to turn the gate off. Unset means normal password/key auth. |
 | `ROMARR_SSO_PROVIDER` | `authentik` (default), `authelia`, `cloudflare`, `oauth2-proxy`. |
 | `ROMARR_TRUSTED_PROXIES` | **Required for `forward`.** CIDRs allowed to assert identity. |
@@ -850,29 +863,43 @@ the finished answer for such a site. `tests/test_site_downloader.py` asserts
 the absence of the evasion machinery, so the promise fails the build rather
 than eroding quietly.
 
-**Installing the browser mode.** It is deliberately not a ROMarr dependency —
-Chromium is 867MB and 236 packages on Debian, which is not something to put in
-a 1GB container that will never use it. Direct downloads work without any of
-this, and the Download Clients page says so rather than failing obscurely.
+**Installing the browser mode.** The default Docker image stays small and does
+not include Playwright. Direct downloads work without it. The browser image
+adds the Playwright Python client on Debian but deliberately contains no
+Chromium; it connects to a separate browser server. Keep the client and server
+on the same Playwright version (the current image uses `1.62.0`). It is
+published as `ghcr.io/snapetech/romarrng:browser` for AMD64 and ARM64.
+
+On Unraid, use the [ROMarrNG Browser template](packaging/unraid/romarrng-browser.xml)
+instead of the standard template. It uses the same `/config` appdata and port,
+so stop the standard container before switching. Start the matching browser
+server on Unraid:
 
 ```bash
-# On the machine that will run the browser:
-pip install playwright && playwright install --with-deps chromium
+docker run -d --name romarrng-playwright --restart unless-stopped \
+  -p 3000:3000 --init --ipc=host \
+  mcr.microsoft.com/playwright:v1.62.0-noble \
+  npx -y playwright@1.62.0 run-server --port 3000 --host 0.0.0.0
 ```
 
-Then either leave **Browser Host** blank to launch Chromium beside ROMarr, or
-— better for a small container — run the browser somewhere else:
+Set **Browser Host** to `<unraid-ip>`, **Browser Port** to `3000`, and
+**Scheme** to `ws`. The browser server can also run on another host; use that
+host's address instead. The driver streams the finished download back over
+the same socket, so the two containers need no shared download directory.
+Keep the browser server port on a trusted network and do not forward it from
+the internet.
+
+For a source or non-container install, install the client and a local Chromium:
 
 ```bash
-# On the browser's host:
-playwright run-server --host 0.0.0.0 --port 3000
+pip install playwright==1.62.0
+playwright install --with-deps chromium
 ```
 
-and point ROMarr at `ws://<host>:3000`. The driver runs there, so the finished
-file streams back over the same socket and the two need no shared directory.
-(An `http://` endpoint — a bare `chromium --remote-debugging-port` — works too,
-but that Chromium saves onto its own disk, so it needs a directory both can
-see plus a remote path mapping.)
+With a local browser installed, leave **Browser Host** blank. An `http://`
+endpoint for a bare `chromium --remote-debugging-port` also works, but that
+Chromium saves onto its own disk, so it needs a directory both can see plus a
+remote path mapping.
 
 **API:** `GET /api/v1/downloadclient/browser` reports whether the lane can run
 here and why not when it cannot.
