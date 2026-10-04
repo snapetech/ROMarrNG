@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.14.0] - 2026-10-04
+
+### User-facing changes
+
+#### Added
+
+- **Seerrng Integration:** SeerrNG can now browse ROMarrNG's loaded DAT catalogs without IGDB credentials. Titles are grouped by supported system, requests keep a stable DAT identity, and unmatched DAT systems are reported for review.
+  - **Action required:** Load DAT files in ROMarrNG to make their matched systems available in SeerrNG.
+
 ## [0.13.1] - 2026-10-03
 
 ### User-facing changes
