@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.1] - 2026-10-03
+
+### User-facing changes
+
+#### Added
+
+- **System:** The System status page now includes a Ko-fi link for users who want to support ROMarrNG maintenance.
+
 ## [0.13.0] - 2026-10-03
 
 ### User-facing changes
