@@ -338,7 +338,8 @@ def test_partial_request_import_is_failed_and_not_deliverable(tmp_path, monkeypa
     assert _seerr_local_assets(service, request) == []
     view = _seerr_request_view(service, request)
     assert view["status"] == "failed"
-    assert view["error"] == "disk full"
+    assert view["error"] == "The download could not be imported into the library."
+    assert view["failureCode"] == "IMPORT_FAILED"
     assert not view["deliverable"]
     service._library_cache = ([SimpleNamespace(name="Game", platform="ps5")], 0, 0)
     service._library_partial = False

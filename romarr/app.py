@@ -57,6 +57,7 @@ from .libraries import (
 from .clients import QBittorrent, QbitConfig, Romm, RommConfig
 from . import hub  # ROM Hub bridge -- the Cartridge plugin layer
 from .dat import DatIndex, parse_dat
+from .dat_catalog import dat_catalog_game, dat_catalog_page, dat_catalog_platforms
 from .decompress import run_batch as run_decompress_batch, scan_compressed
 from .titled import TitleDBIndex, build_index as build_titled_index, validate_switch_rom
 from .downloaders import (
@@ -418,7 +419,7 @@ def _seerr_request_view(service, request: SeerrRequest) -> dict:
     queue_item = queue_rows[-1] if queue_rows else None
     assets = _seerr_local_assets(service, request)
     status = "searching" if request.status == "dispatching" else request.status
-    error = request.error or None
+    failure_detail = request.error or ""
     if status != "cancelled":
         if queue_item and queue_item.state == "imported":
             status, error = "available", None
@@ -426,38 +427,77 @@ def _seerr_request_view(service, request: SeerrRequest) -> dict:
             status, error = "downloading", None
         elif queue_item and queue_item.state in ("failed", "import-failed"):
             status = "failed"
-            error = queue_item.detail or request.error or "ROMarr could not complete the request."
+            failure_detail = queue_item.detail or failure_detail
         elif assets or _seerr_library_matches(service, request):
-            status, error = "available", None
-        if (
-            not (request.status == "dispatching" and status == "searching")
-            and (status != request.status or (error or "") != request.error)
-        ):
-            service.store.update_seerr_request(
-                request.external_request_id,
-                status=status,
-                error=error or "",
-            )
-            request.status = status
-            request.error = error or ""
+            status, failure_detail = "available", ""
+    failure_code = None
+    failure_message = None
+    error = None
+    if status == "failed":
+        detail = failure_detail.casefold()
+        if queue_item and queue_item.state == "import-failed":
+            failure_code = "IMPORT_FAILED"
+            failure_message = "The download could not be imported into the library."
+        elif "no usable release" in detail or "no release" in detail:
+            failure_code = "NO_RELEASE_FOUND"
+            failure_message = "No usable release was found."
+        elif "no download client configured" in detail:
+            failure_code = "DOWNLOAD_CLIENT_NOT_CONFIGURED"
+            failure_message = "ROMarrNG needs a download client for this release."
+        elif "rejected the release" in detail or "no usable download link" in detail:
+            failure_code = "DOWNLOAD_HANDOFF_FAILED"
+            failure_message = "The selected release could not be handed to the download client."
+        elif "import" in detail:
+            failure_code = "IMPORT_FAILED"
+            failure_message = "The download could not be imported into the library."
+        else:
+            failure_code = "REQUEST_FAILED"
+            failure_message = "ROMarrNG could not complete this request."
+        error = failure_message
+    if status != "failed" and status != "cancelled":
+        failure_detail = ""
+    dispatch_in_progress = request.status == "dispatching" and status == "searching"
+    if not dispatch_in_progress and (
+        status != request.status or (error or "") != request.error
+    ):
+        service.store.update_seerr_request(
+            request.external_request_id,
+            status=status,
+            error=error or "",
+        )
+        request.status = status
+        request.error = error or ""
+    identity = None
+    if request.catalog_provider == "dat" and request.catalog_key:
+        identity = {
+            "catalogProvider": "dat",
+            "catalogKey": request.catalog_key,
+            "platformSlug": request.platform,
+        }
+    elif request.catalog_id:
+        identity = {
+            "catalogProvider": request.catalog_provider or "igdb",
+            "catalogId": request.catalog_id,
+            "platformId": request.platform_id,
+        }
     return {
         "externalRequestId": request.external_request_id,
         # Generic external-platform clients use these stable, concise names;
         # the SeerrNG contract fields below remain unchanged.
         "request_id": request.external_request_id,
         "name": request.game,
-        "assets": [str(asset["path"]) for asset in assets if asset.get("path")],
         "status": status,
+        "stage": status,
+        "percent": None,
+        "failureCode": failure_code,
+        "failureMessage": failure_message,
         "deliverable": bool(assets),
         "error": error,
         "title": request.game,
         "game": {"id": request.external_request_id,
                  "title": request.game, "status": status},
         "platform": request.platform,
-        "identity": ({"catalogProvider": request.catalog_provider,
-                      "catalogId": request.catalog_id,
-                      "platformId": request.platform_id}
-                     if request.catalog_id else None),
+        "identity": identity,
         "actions": {
             "retry": status == "failed",
             "cancel": (status not in ("cancelled", "available", "downloading", "importing")
@@ -472,6 +512,7 @@ def _seerr_request_view(service, request: SeerrRequest) -> dict:
 def _seerr_request_identity_matches(
     row: SeerrRequest, game: str, platform: str,
     catalog_provider: str, catalog_id: int, platform_id: int,
+    catalog_key: str = "",
 ) -> bool:
     return (
         _seerr_title_key(row.game) == _seerr_title_key(game)
@@ -479,6 +520,7 @@ def _seerr_request_identity_matches(
         and row.catalog_provider == catalog_provider
         and row.catalog_id == catalog_id
         and row.platform_id == platform_id
+        and row.catalog_key == catalog_key
     )
 
 
@@ -2266,6 +2308,8 @@ class ROMarr:
                                     content = dat_file.read().decode('utf-8', errors='replace')
                                     parsed = parse_dat(content)
                                     if parsed.games:
+                                        if not parsed.name:
+                                            parsed.name = Path(dat_name).stem[:160]
                                         self.dats.add(parsed)
                                         loaded_count += 1
                     except (zipfile.BadZipFile, OSError) as zip_err:
@@ -2273,8 +2317,11 @@ class ROMarr:
                         continue
                 else:
                     # Regular .dat or .xml file
-                    self.dats.add(parse_dat(path.read_text(encoding="utf-8",
-                                                           errors="replace")))
+                    parsed = parse_dat(path.read_text(encoding="utf-8",
+                                                      errors="replace"))
+                    if parsed.games and not parsed.name:
+                        parsed.name = path.stem[:160]
+                    self.dats.add(parsed)
                     loaded_count += 1
             except (OSError, ValueError) as exc:
                 log.warning("could not read %s: %s", path, exc)
@@ -5163,9 +5210,10 @@ def make_handler(service: ROMarr):
                     "service": "ROMarrNG",
                     "version": VERSION,
                     "apiVersion": 1,
-                    "requestContractVersion": 1,
+                    "requestContractVersion": 2,
                     "capabilities": {
                         "catalog": catalog,
+                        "datCatalog": bool(service.dats.dats),
                         "pcAcquisition": False,
                         "emulationAcquisition": True,
                         "requestActions": {"retry": True, "cancel": True},
@@ -5184,6 +5232,7 @@ def make_handler(service: ROMarr):
                     "apiVersion": 1,
                     "capabilities": {
                         "catalog": catalog,
+                        "datCatalog": bool(service.dats.dats),
                         "emulationAcquisition": True,
                         "requestActions": {"retry": True, "cancel": True},
                         "assetStreaming": True,
@@ -5204,6 +5253,76 @@ def make_handler(service: ROMarr):
                 if current is None:
                     return self._json(404, {"error": "no tracked requests"})
                 return self._json(200, _seerr_request_view(service, current))
+            dat_catalog_routes = {
+                "/api/v1/integration/catalog/dat/platforms",
+                "/api/v1/integration/catalog/dat/search-page",
+                "/api/v1/integration/catalog/dat/browse-page",
+            }
+            dat_game_prefix = "/api/v1/integration/catalog/dat/games/"
+            if route.path in dat_catalog_routes or route.path.startswith(dat_game_prefix):
+                if not service.dats.dats:
+                    return self._json(503, {
+                        "error": "No DAT catalog is loaded in ROMarrNG"
+                    })
+                regions = service.store.settings.get("preferred_regions")
+                if not isinstance(regions, list):
+                    regions = ["usa", "world", "europe", "japan"]
+                if route.path == "/api/v1/integration/catalog/dat/platforms":
+                    return self._json(
+                        200, dat_catalog_platforms(service.dats.dats, regions)
+                    )
+                if route.path.startswith(dat_game_prefix):
+                    key = unquote(route.path[len(dat_game_prefix):])
+                    game = dat_catalog_game(service.dats.dats, key, regions)
+                    return self._json(200, game) if game else self._json(
+                        404, {"error": "DAT catalog title not found"}
+                    )
+                try:
+                    limit = int((query.get("limit") or ["24"])[0])
+                    raw_platforms = (query.get("platformSlugs") or [""])[0]
+                    if raw_platforms and not re.fullmatch(
+                        r"[a-z0-9_-]+(?:,[a-z0-9_-]+){0,99}", raw_platforms
+                    ):
+                        raise ValueError("invalid DAT platform slugs")
+                    platform_slugs = raw_platforms.split(",") if raw_platforms else []
+                    if len(set(platform_slugs)) != len(platform_slugs):
+                        raise ValueError("invalid DAT platform slugs")
+                    is_search = route.path.endswith("search-page")
+                    if is_search:
+                        term = (query.get("q") or [""])[0].strip()
+                        if not term:
+                            raise ValueError("a search query is required")
+                        raw_cursor = (query.get("cursor") or ["0"])[0]
+                        if not re.fullmatch(r"(?:0|[1-9][0-9]{0,4})", raw_cursor):
+                            raise ValueError("invalid DAT catalog cursor")
+                        rows, next_offset = dat_catalog_page(
+                            service.dats.dats,
+                            limit=limit,
+                            offset=int(raw_cursor),
+                            platform_slugs=platform_slugs,
+                            query=term,
+                            preferred_regions=regions,
+                        )
+                        return self._json(200, {
+                            "results": rows,
+                            "nextCursor": (
+                                str(next_offset) if next_offset is not None else None
+                            ),
+                        })
+                    offset = int((query.get("offset") or ["0"])[0])
+                    rows, next_offset = dat_catalog_page(
+                        service.dats.dats,
+                        limit=limit,
+                        offset=offset,
+                        platform_slugs=platform_slugs,
+                        preferred_regions=regions,
+                    )
+                    return self._json(200, {
+                        "results": rows,
+                        "nextOffset": next_offset,
+                    })
+                except (TypeError, ValueError) as exc:
+                    return self._json(400, {"error": str(exc)[:160]})
             catalog_routes = {
                 "/api/v1/integration/catalog/platforms",
                 "/api/v1/integration/catalog/search",
@@ -5938,29 +6057,55 @@ def make_handler(service: ROMarr):
                 catalog_provider = str(identity.get("catalogProvider") or "").strip().lower()
                 catalog_id = identity.get("catalogId")
                 platform_id = identity.get("platformId", 0)
-                if catalog_provider:
-                    if (catalog_provider != "igdb"
-                            or not isinstance(catalog_id, int) or isinstance(catalog_id, bool)
+                catalog_key = identity.get("catalogKey", "")
+                identity_platform = identity.get("platformSlug")
+                if catalog_provider == "igdb":
+                    if (not isinstance(catalog_id, int) or isinstance(catalog_id, bool)
                             or not 1 <= catalog_id <= 9999999999
                             or not isinstance(platform_id, int) or isinstance(platform_id, bool)
-                            or not 0 <= platform_id <= 9999999999):
+                            or not 0 <= platform_id <= 9999999999
+                            or catalog_key not in ("", None)
+                            or identity_platform not in (None, "")):
                         return self._json(400, {"error": "invalid catalog identity"})
-                else:
-                    if any(identity.get(key) is not None
-                           for key in ("catalogId", "platformId")):
+                    catalog_key = ""
+                elif catalog_provider == "dat":
+                    if (not isinstance(catalog_key, str)
+                            or not re.fullmatch(r"dat-[0-9a-f]{64}", catalog_key)
+                            or catalog_id is not None
+                            or "platformId" in identity
+                            or identity_platform != (platform.slug if platform else None)):
                         return self._json(400, {"error": "invalid catalog identity"})
                     catalog_id = 0
                     platform_id = 0
+                elif catalog_provider:
+                    return self._json(400, {"error": "invalid catalog identity"})
+                else:
+                    if any(identity.get(key) is not None
+                           for key in ("catalogId", "platformId", "catalogKey", "platformSlug")):
+                        return self._json(400, {"error": "invalid catalog identity"})
+                    catalog_id = 0
+                    platform_id = 0
+                    catalog_key = ""
                 if (not re.fullmatch(r"[A-Za-z0-9._:-]{1,255}", external_id)
                         or not game or len(game) > 500 or platform is None):
                     return self._json(400, {
                         "error": "externalRequestId, game and a valid platform are required"})
+                if catalog_provider == "dat":
+                    selected = dat_catalog_game(
+                        service.dats.dats,
+                        catalog_key,
+                        service.store.settings.get("preferred_regions"),
+                    )
+                    if (selected is None
+                            or selected["platformOptions"][0]["key"] != platform.slug
+                            or _seerr_title_key(selected["title"]) != _seerr_title_key(game)):
+                        return self._json(400, {"error": "invalid DAT catalog identity"})
                 with service._seerr_request_lock:
                     existing = service.store.get_seerr_request(external_id)
                     if existing:
                         if not _seerr_request_identity_matches(
                             existing, game, platform.slug, catalog_provider,
-                            catalog_id or 0, platform_id or 0,
+                            catalog_id or 0, platform_id or 0, catalog_key,
                         ):
                             return self._json(409, {
                                 "error": "externalRequestId is already bound to a different game or platform identity"})
@@ -5971,6 +6116,7 @@ def make_handler(service: ROMarr):
                         platform=platform.slug,
                         catalog_provider=catalog_provider,
                         catalog_id=catalog_id or 0,
+                        catalog_key=catalog_key,
                         platform_id=platform_id or 0,
                         status="available" if _seerr_library_matches(
                             service,
@@ -5988,7 +6134,7 @@ def make_handler(service: ROMarr):
                             service._seerr_dispatch_pool.release(external_id)
                         if not _seerr_request_identity_matches(
                             stored, game, platform.slug, catalog_provider,
-                            catalog_id or 0, platform_id or 0,
+                            catalog_id or 0, platform_id or 0, catalog_key,
                         ):
                             return self._json(409, {
                                 "error": "externalRequestId is already bound to a different game or platform identity"})

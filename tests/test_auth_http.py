@@ -15,14 +15,24 @@ import socket
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from http.server import ThreadingHTTPServer
 
 import pytest
 
 from romarr.app import ROMarr, make_handler
+from romarr.dat import parse_dat
 from romarr.libraries import Game
 from romarr.store import SeerrRequest
+
+SEERR_CONTRACT_V2 = json.loads(
+    (
+        Path(__file__).resolve().parents[1]
+        / "docs"
+        / "SEERRNG-INTEGRATION.contract-v2.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 @pytest.fixture
@@ -144,6 +154,102 @@ def test_seerrng_library_lookup_is_bounded_and_distinguishes_partial_cache(serve
     code, _, _ = get(route, key="testkey", method="POST",
                      body={"titles": [{"title": "x", "platform": "invalid"}]})
     assert code == 400
+
+
+def test_seerrng_can_browse_and_request_a_dat_catalog_title(server, monkeypatch):
+    base, service = server
+    service.dats.add(parse_dat(
+        '''<datafile><header><name>Nintendo - Super Nintendo Entertainment System</name><version>2025</version></header>
+        <game name="Chrono Trigger (USA)"/><game name="Chrono Trigger (Europe)"/>
+        <game name="Super Metroid (USA)"/>
+        </datafile>'''
+    ))
+    code, body, _ = get(
+        base + "/api/integration/seerrng/v1/ping",
+        key=service.auth.integration_key,
+    )
+    assert code == 200
+    handshake = json.loads(body)
+    assert handshake["requestContractVersion"] == SEERR_CONTRACT_V2["requestContractVersion"]
+    assert set(handshake["capabilities"]) == set(
+        SEERR_CONTRACT_V2["handshake"]["capabilities"]
+    )
+    assert handshake["capabilities"]["datCatalog"] is True
+    assert handshake["capabilities"]["emulationAcquisition"] is True
+
+    code, body, _ = get(
+        base + "/api/integration/seerrng/v1/catalog/dat/platforms",
+        key=service.auth.integration_key,
+    )
+    assert code == 200
+    assert json.loads(body)["results"][0]["slug"] == "snes"
+
+    code, body, _ = get(
+        base + "/api/integration/seerrng/v1/catalog/dat/browse-page?platformSlugs=snes&limit=1",
+        key=service.auth.integration_key,
+    )
+    assert code == 200
+    [game] = json.loads(body)["results"]
+    assert game["catalogProvider"] == "dat"
+    assert game["title"] == "Chrono Trigger"
+
+    dispatched = threading.Event()
+    monkeypatch.setattr(
+        service,
+        "request",
+        lambda *_args, **_kwargs: (dispatched.set() or {"ok": False}),
+    )
+    payload = {
+        "externalRequestId": "seerrng:dat:chrono-trigger",
+        "game": game["title"],
+        "platform": "snes",
+        "identity": {
+            "catalogProvider": "dat",
+            "catalogKey": game["catalogId"],
+            "platformSlug": "snes",
+        },
+    }
+    code, body, _ = get(
+        base + "/api/integration/seerrng/v1/requests",
+        key=service.auth.integration_key,
+        method="POST",
+        body=payload,
+    )
+    assert code == 202
+    request = json.loads(body)
+    assert request["identity"]["catalogProvider"] == "dat"
+    assert request["identity"]["catalogKey"] == game["catalogId"]
+    assert "assets" not in request
+    assert dispatched.wait(2)
+
+    code, _, _ = get(
+        base + "/api/integration/seerrng/v1/requests",
+        key=service.auth.integration_key,
+        method="POST",
+        body=payload,
+    )
+    assert code == 200
+    code, body, _ = get(
+        base + "/api/integration/seerrng/v1/catalog/dat/search-page?q=Super%20Metroid&platformSlugs=snes",
+        key=service.auth.integration_key,
+    )
+    assert code == 200
+    [other_game] = json.loads(body)["results"]
+    mismatch = {
+        **payload,
+        "game": other_game["title"],
+        "identity": {
+            "catalogProvider": "dat",
+            "catalogKey": other_game["catalogId"],
+            "platformSlug": "snes",
+        },
+    }
+    assert get(
+        base + "/api/integration/seerrng/v1/requests",
+        key=service.auth.integration_key,
+        method="POST",
+        body=mismatch,
+    )[0] == 409
 
 
 def test_seerrng_scoped_key_cannot_read_the_admin_api(server):
@@ -691,6 +797,37 @@ def test_complete_game_bundle_is_authenticated_and_request_scoped(server, tmp_pa
     assert headers["Content-Range"] == f"bytes 1024-2047/{len(body)}"
     assert get(download, key="testkey", byte_range=f"bytes={len(body)}-")[0] == 416
     assert get(download.replace("seerr-1", "seerr-2"), key="testkey")[0] == 404
+
+
+def test_seerr_request_views_do_not_return_host_paths(server, tmp_path, monkeypatch):
+    base, service = server
+    root = tmp_path / "private-library-root"
+    asset = root / "snes" / "Chrono Trigger.sfc"
+    asset.parent.mkdir(parents=True)
+    asset.write_bytes(b"rom")
+    monkeypatch.setattr(service, "library_for", lambda _: ({"path": str(root)}, None))
+    request = SeerrRequest(
+        "seerrng:path-privacy",
+        "Chrono Trigger",
+        "snes",
+        status="available",
+        assets=[str(asset)],
+    )
+    service.store.put_seerr_request(request)
+
+    for path in (
+        "/api/v1/integration/requests",
+        "/api/v1/integration/requests/current",
+        "/api/v1/integration/requests/seerrng:path-privacy",
+    ):
+        code, body, _ = get(base + path, key=service.auth.integration_key)
+        assert code == 200
+        assert str(root).encode() not in body
+        payload = json.loads(body)
+        row = payload["requests"][0] if isinstance(payload, dict) and "requests" in payload else payload
+        for field in SEERR_CONTRACT_V2["privacy"]["requestStatusForbiddenFields"]:
+            assert field not in row
+        assert row["deliverable"] is True
 
 
 def test_generic_external_request_contract_coexists_with_seerrng(server):

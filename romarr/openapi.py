@@ -52,8 +52,12 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "/api/integration/seerrng/v1/catalog/popular": ("GET", "Popular IGDB titles."),
     "/api/integration/seerrng/v1/catalog/popular-page": ("GET", "Popular IGDB titles with offset pagination and optional filters."),
     "/api/integration/seerrng/v1/catalog/games/{igdbId}": ("GET", "Read one IGDB title; an optional platformId returns its exact day-precision platform release date."),
+    "/api/integration/seerrng/v1/catalog/dat/platforms": ("GET", "ROMarrNG DAT systems, title counts, and DAT names that could not be mapped to a supported platform."),
+    "/api/integration/seerrng/v1/catalog/dat/search-page": ("GET", "Search the loaded DAT catalog by title with bounded cursor pagination."),
+    "/api/integration/seerrng/v1/catalog/dat/browse-page": ("GET", "Browse loaded DAT titles alphabetically with bounded offset pagination."),
+    "/api/integration/seerrng/v1/catalog/dat/games/{catalogKey}": ("GET", "Read one DAT title by its stable opaque catalog key."),
     "/api/integration/seerrng/v1/library/lookup": ("POST", "Look up SeerrNG emulation requests against the local ROM library."),
-    "/api/integration/seerrng/v1/requests": ("POST", "Idempotently create a SeerrNG emulation request with its IGDB game and platform identity. Returns 503 with Retry-After when all four dispatch slots are busy."),
+    "/api/integration/seerrng/v1/requests": ("POST", "Idempotently create a SeerrNG emulation request with its IGDB or DAT catalog identity. Returns 503 with Retry-After when all four dispatch slots are busy."),
     "/api/integration/seerrng/v1/requests/{externalRequestId}": ("GET", "Read request status, stable catalog identity and available actions."),
     "/api/integration/seerrng/v1/requests/{externalRequestId}/retry": ("POST", "Retry a failed request when its advertised actions allow it."),
     "/api/integration/seerrng/v1/requests/{externalRequestId}/cancel": ("POST", "Cancel a request when its advertised actions allow it."),
@@ -70,6 +74,10 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "/api/v1/integration/catalog/games/{igdbId}": ("GET", "Read one IGDB game "
                                                                   "with platform and media details; optional platformId returns an exact "
                                                                   "day-precision platform release date."),
+    "/api/v1/integration/catalog/dat/platforms": ("GET", "ROMarrNG DAT systems, title counts, and unmapped DAT names."),
+    "/api/v1/integration/catalog/dat/search-page": ("GET", "Search the loaded DAT catalog by title."),
+    "/api/v1/integration/catalog/dat/browse-page": ("GET", "Browse loaded DAT titles alphabetically."),
+    "/api/v1/integration/catalog/dat/games/{catalogKey}": ("GET", "Read one DAT title by its stable opaque catalog key."),
     "/api/v1/integration/library/lookup": ("POST", "Bounded title and platform "
                                              "lookup against the cached ROM library. "
                                              "Returns readiness, partial-cache state, "
@@ -402,6 +410,13 @@ def served_routes(source: str | None = None) -> set[str]:
     if ('catalog_game_prefix = "/api/v1/integration/catalog/games/"' in source
             and 'route.path.startswith(catalog_game_prefix)' in source):
         found.add("/api/v1/integration/catalog/games/{igdbId}")
+    if ('dat_catalog_routes = {' in source
+            and 'route.path in dat_catalog_routes' in source):
+        found.update(path for path in DESCRIPTIONS
+                     if path.startswith("/api/v1/integration/catalog/dat/"))
+    if ('dat_game_prefix = "/api/v1/integration/catalog/dat/games/"' in source
+            and 'route.path.startswith(dat_game_prefix)' in source):
+        found.add("/api/v1/integration/catalog/dat/games/{catalogKey}")
     if 'catalog_routes = {' in source and 'route.path in catalog_routes' in source:
         found.update(path for path in DESCRIPTIONS
                      if path.startswith("/api/v1/integration/catalog/"))

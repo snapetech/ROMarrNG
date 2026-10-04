@@ -29,9 +29,12 @@ searches.
 ## Handshake and platforms
 
 `GET /api/v1/integration/ping` reports `service: "ROMarrNG"`, the application
-version, API and request-contract versions, and capabilities. The `catalog`
-capability is true when an IGDB metadata provider with credentials is
-configured. Catalog requests return `503` when it is not configured.
+version, API and request-contract versions, and capabilities. Request contract
+v2 adds the DAT catalog capability and stable DAT request identities while
+remaining compatible with the existing v1 routes. The `catalog` capability is
+true when an IGDB metadata provider with credentials is configured; catalog
+requests return `503` when it is not configured. `datCatalog` is true when
+ROMarrNG has loaded DAT entries to browse.
 
 `GET /api/platforms` is the authoritative list of importable systems. Each
 entry includes the stable `slug`, display name, aliases, directory layout,
@@ -45,8 +48,8 @@ games already exist in the configured library.
 
 ## Game catalog
 
-The catalog endpoints use ROMarrNG's configured IGDB credentials. Catalog game
-IDs are numeric IGDB IDs. Search and popular rows include a stable `id`
+The IGDB catalog endpoints use ROMarrNG's configured IGDB credentials. Catalog
+game IDs are numeric IGDB IDs. Search and popular rows include a stable `id`
 (`igdb-{id}`), `igdbId`, title, summary, cover URL, release date, platform
 names and `{ id, name }` platform options, genres, rating, publishers,
 developers, screenshots, and videos.
@@ -66,6 +69,32 @@ finite. A failed upstream catalog request returns a generic error without
 exposing provider credentials or request details. Platform release dates never
 fall back to the game's global first-release date.
 
+### DAT catalog
+
+When DAT files are loaded, the v2 contract exposes a preservation catalog that
+does not require IGDB credentials. It reports the ROMarrNG systems it could
+match and up to 100 unmatched DAT header names for operator review. Detection
+uses declared platform names and aliases; ambiguous or unknown headers remain
+unmatched rather than being assigned to a guessed system.
+
+| Endpoint | Query | Response |
+| --- | --- | --- |
+| `GET /api/integration/seerrng/v1/catalog/dat/platforms` | — | `{ results: [{ slug, name, gameCount }], unmatchedDatNames }` |
+| `GET /api/integration/seerrng/v1/catalog/dat/search-page` | `q` required; `limit` 1–50; optional `cursor` (bounded offset) and comma-separated `platformSlugs` | `{ results, nextCursor }` |
+| `GET /api/integration/seerrng/v1/catalog/dat/browse-page` | `limit` 1–50; optional `offset` and comma-separated `platformSlugs` | `{ results, nextOffset }` in alphabetical title order |
+| `GET /api/integration/seerrng/v1/catalog/dat/games/{catalogKey}` | Stable `dat-<sha256>` key | One DAT catalog title; `404` if it is no longer loaded |
+
+DAT rows identify their source as `catalogProvider: "dat"` and include
+`catalogId` as an opaque `dat-<sha256>` key, a platform slug option, DAT name
+and version, the selected entry name, and variant count. The key is derived
+from the normalized system slug, DAT name, and normalized title group; a DAT
+version refresh does not change it. Entries use ROMarrNG's configured 1G1R
+preferred regions and do not claim IGDB artwork, genre, rating, popularity, or
+release-date metadata. Browse is alphabetical, and search matches titles.
+
+`GET /catalog/dat/platforms` uses the same configured region preference as
+browse and detail, so its game counts agree with the catalog SeerrNG can show.
+
 ## Submit and read requests
 
 `POST /api/v1/integration/requests` accepts a stable caller-owned request ID:
@@ -83,12 +112,15 @@ fall back to the game's global first-release date.
 }
 ```
 
-`identity` is optional. When supplied, `catalogProvider` must be `igdb`,
-`catalogId` must be a positive IGDB ID, and `platformId` is the selected IGDB
-platform ID (or `0` when the target has no catalog platform ID). The request
-ID must contain 1 to 255 letters, digits, periods, underscores, colons, or
-hyphens; the title is limited to 500 characters and the platform must resolve
-to a supported ROMarrNG system. Invalid input returns `400`.
+`identity` is optional. For IGDB, `catalogProvider` is `igdb`, `catalogId` is a
+positive IGDB ID, and `platformId` is the selected IGDB platform ID (or `0`
+when the target has no catalog platform ID). For DAT, `catalogProvider` is
+`dat`, `catalogKey` is the stable key returned by the DAT catalog, and
+`platformSlug` is the selected ROMarrNG system. The title, platform and key
+must resolve to the same loaded DAT entry. The request ID must contain 1 to
+255 letters, digits, periods, underscores, colons, or hyphens; the title is
+limited to 500 characters and the platform must resolve to a supported
+ROMarrNG system. Invalid input returns `400`.
 
 The first submission returns `202` while ROMarrNG processes the request. A
 repeat submission with the same ID returns the existing record only when its
@@ -103,8 +135,12 @@ still applies because a transfer may already exist.
 `GET /api/v1/integration/requests/{externalRequestId}` returns status, title,
 platform, catalog identity when present, whether imported files can be
 delivered, a safe failure message, and available `actions.retry` and
-`actions.cancel` flags. Status values include `searching`, `downloading`,
-`available`, `failed`, and `cancelled`.
+`actions.cancel` flags. V2 also returns `stage`, nullable `percent`, and a
+stable `failureCode`. ROMarrNG currently reports `percent: null` because its
+acquisition pipeline does not have a truthful percentage to share. Failure
+messages are generic; the request status response never includes local asset
+paths. Status values include `searching`, `downloading`, `available`,
+`failed`, and `cancelled`.
 
 ## Retry and cancel
 

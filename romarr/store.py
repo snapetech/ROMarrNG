@@ -143,6 +143,9 @@ class SeerrRequest:
     platform: str
     catalog_provider: str = ""
     catalog_id: int = 0
+    # Provider-scoped opaque identity for catalogs whose IDs are not numeric
+    # (currently ROMarrNG DAT entries). `catalog_id` remains the IGDB field.
+    catalog_key: str = ""
     platform_id: int = 0
     status: str = "accepted"
     error: str = ""
@@ -367,6 +370,7 @@ class Store:
                         platform=platform,
                         catalog_provider=str(item.get("catalog_provider") or ""),
                         catalog_id=catalog_id,
+                        catalog_key=str(item.get("catalog_key") or ""),
                         platform_id=platform_id,
                         status=status,
                         error=str(item.get("error") or ""),
