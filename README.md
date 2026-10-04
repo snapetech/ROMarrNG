@@ -14,6 +14,8 @@ Move Weight
 
 ROMarr runs perfectly well on its own — nothing above it is required.
 
+Support ROMarrNG on [Ko-fi](https://ko-fi.com/snapetech).
+
 On Unraid, the [ROMarrNG fork template](packaging/unraid/romarrng.xml) installs
 the standalone `ghcr.io/snapetech/romarrng:latest` image. Map persistent
 appdata to `/config`, your game library to `/roms`, and completed downloads to

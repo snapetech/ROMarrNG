@@ -2871,6 +2871,7 @@ RENDER.status=async()=>{
       <div><b>${h.dat_games||0}</b><span>Known dumps</span></div>
       <div><b>${h.events}</b><span>History events</span></div>
       <div><b>${esc(h.uptime)}</b><span>Uptime</span></div>
+      <div><b><a href="https://ko-fi.com/snapetech" target="_blank" rel="noopener noreferrer">Support ROMarrNG</a></b><span>Ko-fi</span></div>
     </div></div>
 
     <div class="card"><h3>Backup and export</h3>
