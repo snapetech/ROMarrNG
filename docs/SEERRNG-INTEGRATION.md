@@ -166,6 +166,14 @@ successful imports that still resolve beneath the configured library root.
 The response includes opaque asset IDs, display names, sizes, and whether a
 multi-file bundle is available. It does not expose filesystem paths.
 
+Each asset also carries `datVerified` when the handshake reports the
+`assetDatVerification` capability: `true` when the imported file's hash
+matches the loaded DAT, `false` when it was hashed but is not in the DAT
+(homebrew, hacks, translations, or dumps newer than the DAT), and `null` when
+ROMarrNG never hashed it (for example a multi-file bundle, or an import made
+without DATs loaded). Bad dumps are refused at import unless forced, so they do
+not normally appear here.
+
 `GET /api/v1/integration/requests/{externalRequestId}/assets/{assetId}` streams
 an imported file or supported bundle. ROMarrNG checks the request and asset
 again before opening it, refuses missing files and paths outside the configured

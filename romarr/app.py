@@ -405,8 +405,12 @@ def _seerr_local_assets(service, request: SeerrRequest) -> list[dict]:
             except (OSError, ValueError):
                 continue
             asset_id = hashlib.sha256(str(real).encode("utf-8")).hexdigest()
+            hashes = getattr(service, "hashes", None)
+            verified = (hashes.verified_for_path(str(candidate), str(real))
+                        if hashes is not None else None)
             assets.append({"id": asset_id, "name": real.name,
-                           "size": size, "path": real})
+                           "size": size, "path": real,
+                           "datVerified": verified})
             if len(assets) >= 100:
                 return assets
     return assets
@@ -5232,6 +5236,7 @@ def make_handler(service: ROMarr):
                         "emulationAcquisition": True,
                         "requestActions": {"retry": True, "cancel": True},
                         "assetStreaming": True,
+                        "assetDatVerification": True,
                     },
                 })
             if route.path == "/api/v1/integration/info":
@@ -5250,6 +5255,7 @@ def make_handler(service: ROMarr):
                         "emulationAcquisition": True,
                         "requestActions": {"retry": True, "cancel": True},
                         "assetStreaming": True,
+                        "assetDatVerification": True,
                     },
                 })
             if route.path == "/api/v1/integration/requests":
@@ -5438,7 +5444,11 @@ def make_handler(service: ROMarr):
                     assets = _seerr_local_assets(service, request)
                     return self._json(200, {
                         "assets": [{"id": item["id"], "name": item["name"],
-                                    "size": item["size"], "url": ""}
+                                    "size": item["size"], "url": "",
+                                    # True: matches the loaded DAT. False:
+                                    # hashed but not in it (homebrew, hacks,
+                                    # newer dumps). None: never hashed.
+                                    "datVerified": item.get("datVerified")}
                                    for item in assets],
                         "bundleSupported": any("members" in item for item in assets),
                     })

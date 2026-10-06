@@ -68,6 +68,9 @@ class HashIndex:
         #: several dumps; the first verified one wins, because that is the one
         #: worth offering a stranger.
         self._by_game: dict[tuple[str, str], str] = {}
+        #: imported file path -> sha1, so a delivered file can report whether
+        #: its bytes matched the loaded DAT.
+        self._by_path: dict[str, str] = {}
 
     # -- building ------------------------------------------------------------
 
@@ -80,6 +83,8 @@ class HashIndex:
                       verified=bool(verified), path=path)
         with self._lock:
             self._by_sha1[sha1] = entry
+            if path:
+                self._by_path[str(path)] = sha1
             key = (str(platform or "").lower(), normalise(name))
             if key[1]:
                 existing = self._by_game.get(key)
@@ -100,9 +105,25 @@ class HashIndex:
                 del self._by_sha1[sha1]
             self._by_game = {k: v for k, v in self._by_game.items()
                              if k[0] != slug}
+            self._by_path = {p: s for p, s in self._by_path.items()
+                             if s in self._by_sha1}
             return len(gone)
 
     # -- asking --------------------------------------------------------------
+
+    def verified_for_path(self, *paths: str) -> bool | None:
+        """DAT verdict for an imported file, or None when it was never hashed.
+
+        Several spellings of one path may be passed (as written at import and
+        as resolved later); the first one the index knows answers.
+        """
+        with self._lock:
+            for path in paths:
+                sha1 = self._by_path.get(str(path or ""))
+                entry = self._by_sha1.get(sha1) if sha1 else None
+                if entry is not None:
+                    return entry.verified
+        return None
 
     def by_sha1(self, sha1: str) -> Entry | None:
         with self._lock:
@@ -157,6 +178,7 @@ class HashIndex:
         with self._lock:
             self._by_sha1.clear()
             self._by_game.clear()
+            self._by_path.clear()
         for item in raw.get("entries", []):
             if isinstance(item, dict):
                 self.add(item.get("sha1", ""), item.get("name", ""),

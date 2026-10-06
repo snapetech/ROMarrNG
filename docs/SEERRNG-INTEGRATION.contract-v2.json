@@ -13,7 +13,8 @@
         "retry": true,
         "cancel": true
       },
-      "assetStreaming": true
+      "assetStreaming": true,
+      "assetDatVerification": true
     }
   },
   "identityExamples": {
@@ -43,6 +44,6 @@
       "localPath",
       "absolutePath"
     ],
-    "assetMetadataFields": ["id", "name", "size"]
+    "assetMetadataFields": ["id", "name", "size", "datVerified"]
   }
 }
