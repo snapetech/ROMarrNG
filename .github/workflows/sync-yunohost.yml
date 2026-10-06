@@ -25,12 +25,12 @@ jobs:
         with:
           repository: YunoHost-Apps/romarrng_ynh
           ref: testing
-          path: ${{ runner.temp }}/romarrng_ynh
+          path: romarrng_ynh
           token: ${{ secrets.YUNOHOST_REPO_TOKEN }}
           persist-credentials: true
 
       - name: Sync package from main
         env:
-          ROMARRNG_YNH_REPO: ${{ runner.temp }}/romarrng_ynh
+          ROMARRNG_YNH_REPO: ${{ github.workspace }}/romarrng_ynh
           ROMARRNG_YNH_BRANCH: testing
         run: bash scripts/sync-yunohost-package.sh
