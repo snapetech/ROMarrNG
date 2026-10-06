@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.1] - 2026-10-06
+
+### User-facing changes
+
+#### Changed
+
+- **Release Pipeline:** Both published container variants now generate their SBOMs with the updated, SHA-pinned Anchore action, keeping software inventory generation current across the release workflow.
+
 ## [0.14.0] - 2026-10-04
 
 ### User-facing changes
