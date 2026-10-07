@@ -24,10 +24,9 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 
-from cryptography.exceptions import InvalidTag
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.hashes import SHA256
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from Cryptodome.Cipher import AES
+from Cryptodome.Hash import SHA256
+from Cryptodome.Protocol.KDF import PBKDF2
 
 log = logging.getLogger(__name__)
 
@@ -312,7 +311,8 @@ def _backup_passphrase(passphrase: str) -> bytes:
 
 
 def _derive_backup_key(passphrase: bytes, salt: bytes, iterations: int) -> bytes:
-    return PBKDF2HMAC(algorithm=SHA256(), length=32, salt=salt, iterations=iterations).derive(passphrase)
+    return PBKDF2(passphrase, salt, dkLen=32, count=iterations,
+                  hmac_hash_module=SHA256)
 
 
 def encrypt_backup(settings: dict, passphrase: str) -> dict:
@@ -325,7 +325,11 @@ def encrypt_backup(settings: dict, passphrase: str) -> dict:
     plaintext = json.dumps(make_backup(settings, include_secrets=True), separators=(",", ":")).encode("utf-8")
     if len(plaintext) > _BACKUP_MAX_CIPHERTEXT_SIZE - 16:
         raise ValueError("backup is too large to encrypt")
-    ciphertext = AESGCM(_derive_backup_key(password, salt, _BACKUP_KDF_ITERATIONS)).encrypt(nonce, plaintext, aad)
+    cipher = AES.new(_derive_backup_key(password, salt, _BACKUP_KDF_ITERATIONS),
+                     AES.MODE_GCM, nonce=nonce, mac_len=16)
+    cipher.update(aad)
+    encrypted, tag = cipher.encrypt_and_digest(plaintext)
+    ciphertext = encrypted + tag
     return {
         "kind": ENCRYPTED_BACKUP_KIND,
         "version": 1,
@@ -363,9 +367,12 @@ def read_encrypted_backup(payload, passphrase: str) -> tuple[dict, str]:
     password = _backup_passphrase(passphrase)
     aad = _BACKUP_MAGIC + struct.pack(">I", iterations) + salt + nonce
     try:
-        plaintext = AESGCM(_derive_backup_key(password, salt, iterations)).decrypt(nonce, ciphertext, aad)
+        cipher = AES.new(_derive_backup_key(password, salt, iterations),
+                         AES.MODE_GCM, nonce=nonce, mac_len=16)
+        cipher.update(aad)
+        plaintext = cipher.decrypt_and_verify(ciphertext[:-16], ciphertext[-16:])
         backup = json.loads(plaintext)
-    except (InvalidTag, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("passphrase is incorrect or the encrypted backup is damaged") from exc
     settings, warning = read_backup(backup)
     if not backup.get("contains_secrets"):

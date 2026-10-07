@@ -5,4 +5,4 @@ area: release-pipeline
 action: none
 breaking: false
 ---
-The ARMv7 container now builds with the native headers its dependencies need, keeping the supported 32-bit image available for upgrades and new installs.
+Encrypted backups now build across ROMarrNG's published container architectures, keeping the supported ARMv7 image available alongside AMD64 and ARM64.
