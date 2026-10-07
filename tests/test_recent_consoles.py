@@ -351,3 +351,47 @@ def test_partial_request_import_is_failed_and_not_deliverable(tmp_path, monkeypa
                                   imported_paths=[str(imported)]))
     assert _seerr_local_assets(service, request)
     assert _seerr_library_lookup(service, titles)["matches"] == titles
+
+
+
+def test_request_view_reports_rom_placement(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from romarr.library import ImportResult
+    service = ROMarr({"ROMARR_DATA": str(tmp_path / "state.json")})
+    source = tmp_path / "Game.zip"
+    service.clients = [SimpleNamespace(configured=True, completed=lambda: [
+        {"name": "Game.PS5", "content_path": str(source)},
+    ])]
+    service.queue.append(QueueItem("Game", "ps5", "Game.PS5", 10,
+                                  "grabbed", external_request_id="seerr-placed"))
+    root = tmp_path / "library"
+    root.mkdir()
+    imported = root / "Game.pkg"
+    imported.write_bytes(b"complete")
+    cfg = {"path": str(root), "name": "PS5 ROMs"}
+    monkeypatch.setattr(service, "library_for", lambda _: (
+        cfg, SimpleNamespace(rescan=lambda _: True)))
+    monkeypatch.setattr(service, "notify", lambda _: None)
+    monkeypatch.setattr("romarr.app.import_rom", lambda *_, **__: [
+        ImportResult(True, imported),
+    ])
+    [result] = service.import_finished()
+    assert result["ok"]
+
+    view = _seerr_request_view(service, SeerrRequest("seerr-placed", "Game", "ps5"))
+    assert view["rommPlacement"]["placed"] is True
+    assert view["rommPlacement"]["library"] == "PS5 ROMs"
+    assert view["rommPlacement"]["layout"] in ("flat", "nested")
+
+
+def test_request_view_reports_no_placement_when_nothing_is_imported(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    service = ROMarr({"ROMARR_DATA": str(tmp_path / "state.json")})
+    cfg = {"path": str(tmp_path / "library"), "name": "PS5 ROMs"}
+    (tmp_path / "library").mkdir()
+    monkeypatch.setattr(service, "library_for", lambda _: (
+        cfg, SimpleNamespace(rescan=lambda _: True)))
+
+    view = _seerr_request_view(service, SeerrRequest("seerr-none", "Game", "ps5"))
+    assert view["rommPlacement"]["placed"] is False
+    assert view["rommPlacement"]["library"] == "PS5 ROMs"
