@@ -11,7 +11,7 @@ FROM python:3.14-alpine AS builder
 # build-base is needed only where a wheel is missing for the target arch. It is
 # unused on amd64/arm64 and load-bearing on armv7. libseccomp-dev is what
 # pyseccomp compiles against -- the sandbox ROM Hub confines plugins with.
-RUN apk add --no-cache build-base libseccomp-dev
+RUN apk add --no-cache build-base libseccomp-dev libffi-dev
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --prefix=/install -r /tmp/requirements.txt
