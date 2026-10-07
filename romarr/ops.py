@@ -13,13 +13,20 @@ notices until the day it matters:
 from __future__ import annotations
 
 import csv
+import base64
 import io
 import json
 import logging
+import secrets
+import struct
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
+
+from Cryptodome.Cipher import AES
+from Cryptodome.Hash import SHA256
+from Cryptodome.Protocol.KDF import PBKDF2
 
 log = logging.getLogger(__name__)
 
@@ -281,6 +288,95 @@ def read_backup(payload) -> tuple[dict, str]:
         warning = ("This backup was taken without credentials. Download "
                    "clients, indexers and libraries will need their passwords "
                    "and API keys entered again.")
+    return settings, warning
+
+
+ENCRYPTED_BACKUP_KIND = "romarr-encrypted-backup"
+_BACKUP_MAGIC = b"ROMBKUP1"
+_BACKUP_KDF_ITERATIONS = 600_000
+_BACKUP_MIN_KDF_ITERATIONS = 100_000
+_BACKUP_MAX_KDF_ITERATIONS = 2_000_000
+_BACKUP_MAX_CIPHERTEXT_SIZE = 64 * 1024 * 1024
+
+
+def _backup_passphrase(passphrase: str) -> bytes:
+    if not isinstance(passphrase, str):
+        raise ValueError("backup passphrase must be between 16 and 4096 bytes")
+    encoded = passphrase.encode("utf-8")
+    if len(encoded) > 4096:
+        raise ValueError("backup passphrase must be between 16 and 4096 bytes")
+    if sum(not character.isspace() for character in passphrase) < 16:
+        raise ValueError("backup passphrase must contain at least 16 non-whitespace characters")
+    return encoded
+
+
+def _derive_backup_key(passphrase: bytes, salt: bytes, iterations: int) -> bytes:
+    return PBKDF2(passphrase, salt, dkLen=32, count=iterations,
+                  hmac_hash_module=SHA256)
+
+
+def encrypt_backup(settings: dict, passphrase: str) -> dict:
+    """Return a portable, authenticated envelope containing every setting secret."""
+    password = _backup_passphrase(passphrase)
+    salt = secrets.token_bytes(16)
+    nonce = secrets.token_bytes(12)
+    iteration_bytes = struct.pack(">I", _BACKUP_KDF_ITERATIONS)
+    aad = _BACKUP_MAGIC + iteration_bytes + salt + nonce
+    plaintext = json.dumps(make_backup(settings, include_secrets=True), separators=(",", ":")).encode("utf-8")
+    if len(plaintext) > _BACKUP_MAX_CIPHERTEXT_SIZE - 16:
+        raise ValueError("backup is too large to encrypt")
+    cipher = AES.new(_derive_backup_key(password, salt, _BACKUP_KDF_ITERATIONS),
+                     AES.MODE_GCM, nonce=nonce, mac_len=16)
+    cipher.update(aad)
+    encrypted, tag = cipher.encrypt_and_digest(plaintext)
+    ciphertext = encrypted + tag
+    return {
+        "kind": ENCRYPTED_BACKUP_KIND,
+        "version": 1,
+        "cipher": "AES-256-GCM",
+        "kdf": "PBKDF2-HMAC-SHA256",
+        "iterations": _BACKUP_KDF_ITERATIONS,
+        "salt": base64.b64encode(salt).decode("ascii"),
+        "nonce": base64.b64encode(nonce).decode("ascii"),
+        "ciphertext": base64.b64encode(ciphertext).decode("ascii"),
+    }
+
+
+def read_encrypted_backup(payload, passphrase: str) -> tuple[dict, str]:
+    """Authenticate and restore an encrypted backup envelope."""
+    if isinstance(payload, (str, bytes)):
+        try:
+            payload = json.loads(payload)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("not a ROMarr encrypted backup") from exc
+    if not isinstance(payload, dict) or payload.get("kind") != ENCRYPTED_BACKUP_KIND or payload.get("version") != 1:
+        raise ValueError("not a ROMarr encrypted backup")
+    if payload.get("cipher") != "AES-256-GCM" or payload.get("kdf") != "PBKDF2-HMAC-SHA256":
+        raise ValueError("unsupported encrypted backup format")
+    iterations = payload.get("iterations")
+    if isinstance(iterations, bool) or not isinstance(iterations, int) or not (_BACKUP_MIN_KDF_ITERATIONS <= iterations <= _BACKUP_MAX_KDF_ITERATIONS):
+        raise ValueError("encrypted backup parameters are outside supported limits")
+    try:
+        salt = base64.b64decode(payload.get("salt", ""), validate=True)
+        nonce = base64.b64decode(payload.get("nonce", ""), validate=True)
+        ciphertext = base64.b64decode(payload.get("ciphertext", ""), validate=True)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("encrypted backup is malformed") from exc
+    if len(salt) != 16 or len(nonce) != 12 or not 16 <= len(ciphertext) <= _BACKUP_MAX_CIPHERTEXT_SIZE:
+        raise ValueError("encrypted backup parameters are outside supported limits")
+    password = _backup_passphrase(passphrase)
+    aad = _BACKUP_MAGIC + struct.pack(">I", iterations) + salt + nonce
+    try:
+        cipher = AES.new(_derive_backup_key(password, salt, iterations),
+                         AES.MODE_GCM, nonce=nonce, mac_len=16)
+        cipher.update(aad)
+        plaintext = cipher.decrypt_and_verify(ciphertext[:-16], ciphertext[-16:])
+        backup = json.loads(plaintext)
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("passphrase is incorrect or the encrypted backup is damaged") from exc
+    settings, warning = read_backup(backup)
+    if not backup.get("contains_secrets"):
+        raise ValueError("encrypted backup does not contain credentials")
     return settings, warning
 
 

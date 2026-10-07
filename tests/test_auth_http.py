@@ -18,6 +18,7 @@ import urllib.request
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from http.server import ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -48,8 +49,10 @@ def server(tmp_path):
     httpd.server_close()
 
 
-def get(url, key=None, cookie=None, method="GET", body=None, byte_range=None):
+def get(url, key=None, cookie=None, method="GET", body=None, byte_range=None, headers=None):
     request = urllib.request.Request(url, method=method)
+    for name, value in (headers or {}).items():
+        request.add_header(name, value)
     if key:
         request.add_header("X-Api-Key", key)
     if byte_range:
@@ -331,12 +334,36 @@ def test_json_request_bodies_are_bounded_before_parsing(server):
     assert code == 413
     assert json.loads(body)["error"] == "lookup body too large"
 
-    code, body, _ = get(
-        base + "/api/v1/config", key="testkey", method="PUT",
-        body={"oversized": "x" * (2 << 20)},
+    # Declare a body just over the default limit, then close the write side
+    # after a short prefix. The handler must reject from Content-Length before
+    # trying to parse or buffer the full body. Sending a multi-megabyte payload
+    # with urllib makes the client race the server's intentional bounded drain
+    # and can fail with BrokenPipe before it reads the 413 response.
+    target = urlsplit(base)
+    declared_length = (2 << 20) + 1
+    with socket.create_connection(
+        (target.hostname, target.port), timeout=10
+    ) as client:
+        request = (
+            "PUT /api/v1/config HTTP/1.1\r\n"
+            "Host: localhost\r\n"
+            "X-Api-Key: testkey\r\n"
+            "Content-Type: application/json\r\n"
+            f"Content-Length: {declared_length}\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode() + b'{"oversized":'
+        client.sendall(request)
+        client.shutdown(socket.SHUT_WR)
+        response = bytearray()
+        while chunk := client.recv(65536):
+            response.extend(chunk)
+
+    response_headers, separator, response_body = bytes(response).partition(
+        b"\r\n\r\n"
     )
-    assert code == 413
-    assert json.loads(body)["error"] == "request body too large"
+    assert separator
+    assert int(response_headers.splitlines()[0].split()[1]) == 413
+    assert json.loads(response_body)["error"] == "request body too large"
 
 
 @pytest.mark.parametrize("framing", [
@@ -703,6 +730,46 @@ def test_backup_can_include_credentials_when_asked(server):
         {"name": "q", "type": "qbittorrent", "password": "hunter2"}]
     _, body, _ = get(base + "/api/v1/backup?secrets=1", key="testkey")
     assert b"hunter2" in body
+
+
+def test_encrypted_backup_endpoint_exports_and_restores_credentials(server):
+    base, service = server
+    passphrase = "correct horse battery staple"
+    service.store.settings["download_clients"] = [
+        {"name": "q", "type": "qbittorrent", "password": "hunter2"}]
+
+    code, body, headers = get(
+        base + "/api/v1/backup/encrypted",
+        key="testkey",
+        headers={"X-ROMarr-Backup-Passphrase": passphrase},
+    )
+    assert code == 200
+    assert "application/json" in headers.get("Content-Type", "")
+    assert b"hunter2" not in body
+    envelope = json.loads(body)
+    assert envelope["kind"] == "romarr-encrypted-backup"
+
+    service.store.settings["download_clients"][0]["password"] = "changed"
+    code, _, _ = get(
+        base + "/api/v1/restore",
+        key="testkey",
+        method="POST",
+        body=envelope,
+        headers={"X-ROMarr-Backup-Passphrase": passphrase},
+    )
+    assert code == 200
+    assert service.store.settings["download_clients"][0]["password"] == "hunter2"
+
+    service.store.settings["download_clients"][0]["password"] = "still unchanged"
+    code, _, _ = get(
+        base + "/api/v1/restore",
+        key="testkey",
+        method="POST",
+        body=envelope,
+        headers={"X-ROMarr-Backup-Passphrase": "a different long passphrase"},
+    )
+    assert code == 400
+    assert service.store.settings["download_clients"][0]["password"] == "still unchanged"
 
 
 def test_restore_rejects_something_that_is_not_a_backup(server):

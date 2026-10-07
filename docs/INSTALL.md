@@ -659,6 +659,14 @@ curl -H "X-Api-Key: $KEY" http://localhost:6868/api/v1/backup > romarr-backup.js
 curl -H "X-Api-Key: $KEY" "http://localhost:6868/api/v1/backup?secrets=1" > romarr-full.json
 ```
 
+To keep credentials in a portable backup without saving them as readable
+JSON, use **Settings → Backup and export → Download encrypted backup with
+credentials**. Choose a passphrase with at least 16 non-whitespace characters
+and keep it separately from the file. The encrypted export uses AES-256-GCM;
+restore it through the same page and enter the passphrase when prompted. The
+passphrase is sent only in the authenticated `X-ROMarr-Backup-Passphrase`
+header, never in the URL. ROMarr cannot recover a lost passphrase.
+
 Restore either one:
 
 ```bash
