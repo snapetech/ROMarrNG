@@ -184,7 +184,10 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "/api/v1/manualimport": ("GET", "Scan a directory for files ROMarr could adopt."),
     "/api/v1/backup": ("GET", "A restorable snapshot. Credentials are stripped "
                               "unless ?secrets=1."),
-    "/api/v1/restore": ("POST", "Restore a backup."),
+    "/api/v1/backup/encrypted": ("GET", "A credential-inclusive encrypted backup. "
+                                          "Supply X-ROMarr-Backup-Passphrase as a header."),
+    "/api/v1/restore": ("POST", "Restore a credential-free, plain full, or encrypted backup. "
+                                "Encrypted restores use X-ROMarr-Backup-Passphrase."),
     "/api/v1/export": ("GET", "Library, wanted or blocklist as JSON or CSV."),
     "/api/v1/frontend/formats": ("GET", "Available frontend export formats."),
     "/api/v1/frontend/export": ("GET", "LaunchBox XML, ES-DE gamelist.xml or "

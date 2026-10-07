@@ -2877,11 +2877,12 @@ RENDER.status=async()=>{
     <div class="card"><h3>Backup and export</h3>
     <p class="help">A snapshot restores an install: settings, libraries,
     indexers, clients, history and the wanted list. Credentials are stripped
-    unless you ask for them, so the safe file is the default and the one
-    holding secrets takes a deliberate click.</p>
+    unless you ask for them. Use the encrypted export to carry credentials
+    between installs without storing them as plain text.</p>
     <div class="row" style="flex-wrap:wrap;gap:8px">
       <button class="btn" id="bk-dl">Download backup</button>
-      <button class="btn ghost" id="bk-dls">Download with credentials</button>
+      <button class="btn ghost" id="bk-dle">Download encrypted backup with credentials</button>
+      <button class="btn ghost" id="bk-dls">Download with credentials (plain JSON)</button>
       <button class="btn ghost" id="bk-rs">Restore from file…</button>
       <input type="file" id="bk-file" accept="application/json" style="display:none">
     </div>
@@ -2911,6 +2912,22 @@ RENDER.status=async()=>{
     a.href=url; a.download=name; document.body.append(a); a.click(); a.remove();};
 
   $('#bk-dl').onclick=()=>save('/api/v1/backup','romarr-backup.json');
+  $('#bk-dle').onclick=async()=>{
+    const pass=prompt('Choose a passphrase with at least 16 non-whitespace characters. Keep it separately; ROMarr cannot recover it.');
+    if(pass===null) return;
+    const confirmPass=prompt('Re-enter the backup passphrase.');
+    if(confirmPass===null) return;
+    if(pass!==confirmPass){ msg(false,'The passphrases do not match.'); return; }
+    if([...pass].filter(c=>!(/\\s/.test(c))).length<16){ msg(false,'Use at least 16 non-whitespace characters.'); return; }
+    msg(true,'Encrypting backup…');
+    try{
+      const encrypted=await j('/api/v1/backup/encrypted',{headers:{'X-ROMarr-Backup-Passphrase':pass}});
+      if(encrypted.error) throw new Error(encrypted.error);
+      const blob=new Blob([JSON.stringify(encrypted,null,2)],{type:'application/json'});
+      const url=URL.createObjectURL(blob); save(url,'romarr-backup-encrypted.json');
+      setTimeout(()=>URL.revokeObjectURL(url),1000); msg(true,'Encrypted backup downloaded.');
+    }catch(err){ msg(false,err.message||'Could not encrypt backup.'); }
+  };
   $('#bk-dls').onclick=()=>{
     if(confirm('This file will contain your API key and every stored password '
       +'in plain text.\n\nDownload it?'))
@@ -2923,9 +2940,15 @@ RENDER.status=async()=>{
       +'settings, libraries, indexers and clients.')) { e.target.value=''; return; }
     msg(true,'Restoring…');
     try{
-      const r=await j('/api/v1/restore',{method:'POST',
-        headers:{'Content-Type':'application/json'}, body:await file.text()});
-      msg(!r.error, r.error||'Restored. Reloading…');
+      const backup=JSON.parse(await file.text());
+      const headers={'Content-Type':'application/json'};
+      if(backup.kind==='romarr-encrypted-backup'){
+        const pass=prompt('Enter the passphrase used to encrypt this backup.');
+        if(pass===null){ e.target.value=''; return; }
+        headers['X-ROMarr-Backup-Passphrase']=pass;
+      }
+      const r=await j('/api/v1/restore',{method:'POST',headers,body:JSON.stringify(backup)});
+      msg(!r.error, r.error||(r.warning||'Restored.')+' Reloading…');
       if(!r.error) setTimeout(()=>location.reload(),1200);
     }catch(_){ msg(false,'That file is not a ROMarr backup.'); }
     e.target.value='';

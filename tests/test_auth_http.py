@@ -48,8 +48,10 @@ def server(tmp_path):
     httpd.server_close()
 
 
-def get(url, key=None, cookie=None, method="GET", body=None, byte_range=None):
+def get(url, key=None, cookie=None, method="GET", body=None, byte_range=None, headers=None):
     request = urllib.request.Request(url, method=method)
+    for name, value in (headers or {}).items():
+        request.add_header(name, value)
     if key:
         request.add_header("X-Api-Key", key)
     if byte_range:
@@ -703,6 +705,46 @@ def test_backup_can_include_credentials_when_asked(server):
         {"name": "q", "type": "qbittorrent", "password": "hunter2"}]
     _, body, _ = get(base + "/api/v1/backup?secrets=1", key="testkey")
     assert b"hunter2" in body
+
+
+def test_encrypted_backup_endpoint_exports_and_restores_credentials(server):
+    base, service = server
+    passphrase = "correct horse battery staple"
+    service.store.settings["download_clients"] = [
+        {"name": "q", "type": "qbittorrent", "password": "hunter2"}]
+
+    code, body, headers = get(
+        base + "/api/v1/backup/encrypted",
+        key="testkey",
+        headers={"X-ROMarr-Backup-Passphrase": passphrase},
+    )
+    assert code == 200
+    assert "application/json" in headers.get("Content-Type", "")
+    assert b"hunter2" not in body
+    envelope = json.loads(body)
+    assert envelope["kind"] == "romarr-encrypted-backup"
+
+    service.store.settings["download_clients"][0]["password"] = "changed"
+    code, _, _ = get(
+        base + "/api/v1/restore",
+        key="testkey",
+        method="POST",
+        body=envelope,
+        headers={"X-ROMarr-Backup-Passphrase": passphrase},
+    )
+    assert code == 200
+    assert service.store.settings["download_clients"][0]["password"] == "hunter2"
+
+    service.store.settings["download_clients"][0]["password"] = "still unchanged"
+    code, _, _ = get(
+        base + "/api/v1/restore",
+        key="testkey",
+        method="POST",
+        body=envelope,
+        headers={"X-ROMarr-Backup-Passphrase": "a different long passphrase"},
+    )
+    assert code == 400
+    assert service.store.settings["download_clients"][0]["password"] == "still unchanged"
 
 
 def test_restore_rejects_something_that_is_not_a_backup(server):

@@ -91,7 +91,8 @@ from .metadata import (
 )
 from .metadata import discover as metadata_discover
 from .openapi import spec as openapi_spec
-from .ops import (LogRing, RateLimiter, make_backup, read_backup,
+from .ops import (ENCRYPTED_BACKUP_KIND, LogRing, RateLimiter, encrypt_backup,
+                  make_backup, read_backup, read_encrypted_backup,
                   render_metrics, to_csv)
 from .platforms import PLATFORMS, resolve
 from .sso import ForwardAuth
@@ -5603,6 +5604,12 @@ def make_handler(service: ROMarr):
                 include = query.get("secrets", ["0"])[0] in ("1", "true", "yes")
                 return self._json(200, make_backup(service.store.settings,
                                                    include_secrets=include))
+            if route.path == "/api/v1/backup/encrypted":
+                try:
+                    passphrase = self.headers.get("X-ROMarr-Backup-Passphrase", "")
+                    return self._json(200, encrypt_backup(service.store.settings, passphrase))
+                except ValueError as exc:
+                    return self._json(400, {"error": str(exc)})
             if route.path == "/api/v1/export":
                 what = (query.get("what", ["library"])[0] or "library").lower()
                 rows = {
@@ -6270,7 +6277,11 @@ def make_handler(service: ROMarr):
                     release, str(body.get("reason") or "")))
             if route.path == "/api/v1/restore":
                 try:
-                    settings, warning = read_backup(body)
+                    if isinstance(body, dict) and body.get("kind") == ENCRYPTED_BACKUP_KIND:
+                        settings, warning = read_encrypted_backup(
+                            body, self.headers.get("X-ROMarr-Backup-Passphrase", ""))
+                    else:
+                        settings, warning = read_backup(body)
                 except ValueError as exc:
                     return self._json(400, {"error": str(exc)})
                 service.store.settings.update(settings)

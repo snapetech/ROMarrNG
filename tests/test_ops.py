@@ -11,7 +11,8 @@ import json
 import pytest
 
 from romarr.ops import (
-    DEFAULT_LIMITS, RateLimiter, from_csv, make_backup, read_backup,
+    DEFAULT_LIMITS, RateLimiter, encrypt_backup, from_csv, make_backup,
+    read_backup, read_encrypted_backup,
     render_metrics, to_csv)
 
 
@@ -193,6 +194,36 @@ def test_restoring_a_full_backup_warns_about_nothing():
 def test_a_backup_round_trips_through_json():
     settings, _ = read_backup(json.dumps(make_backup(SETTINGS)))
     assert settings["min_seeders"] == 2
+
+
+def test_an_encrypted_backup_hides_credentials_and_round_trips():
+    passphrase = "correct horse battery staple"
+    envelope = encrypt_backup(SETTINGS, passphrase)
+    serialized = json.dumps(envelope)
+
+    assert "hunter2" not in serialized
+    assert "SEERRNGSECRET" not in serialized
+    settings, warning = read_encrypted_backup(serialized, passphrase)
+    assert settings["download_clients"][0]["password"] == "hunter2"
+    assert warning == ""
+
+
+def test_an_encrypted_backup_rejects_a_wrong_passphrase():
+    envelope = encrypt_backup(SETTINGS, "correct horse battery staple")
+    with pytest.raises(ValueError, match="passphrase is incorrect"):
+        read_encrypted_backup(envelope, "a different long passphrase")
+
+
+def test_an_encrypted_backup_authenticates_its_ciphertext():
+    envelope = encrypt_backup(SETTINGS, "correct horse battery staple")
+    envelope["ciphertext"] = envelope["ciphertext"][:-4] + "AAAA"
+    with pytest.raises(ValueError, match="passphrase is incorrect"):
+        read_encrypted_backup(envelope, "correct horse battery staple")
+
+
+def test_encrypted_backup_requires_a_long_passphrase():
+    with pytest.raises(ValueError, match="16 non-whitespace"):
+        encrypt_backup(SETTINGS, "short")
 
 
 @pytest.mark.parametrize("payload", [

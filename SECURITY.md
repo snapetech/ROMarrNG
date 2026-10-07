@@ -300,7 +300,9 @@ Stated so nobody assumes otherwise:
 - **No protection against a malicious library or indexer you configured.**
   ROMarr trusts responses from services you pointed it at.
 - **No encryption at rest.** `romarr.json` and `.env` hold credentials in
-  plaintext; they are `chmod 600` and rely on filesystem permissions.
+  plaintext; they are `chmod 600` and rely on filesystem permissions. A
+  credential-inclusive exported backup can be passphrase-encrypted, but that
+  does not encrypt the active state file.
 - **No multi-user model.** There is one operator. Forward auth can require a
   group, but ROMarr does not distinguish users or keep per-user permissions.
 - **No audit log of who did what**, because there is no "who".
