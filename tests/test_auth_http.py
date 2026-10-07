@@ -18,6 +18,7 @@ import urllib.request
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from http.server import ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -333,12 +334,36 @@ def test_json_request_bodies_are_bounded_before_parsing(server):
     assert code == 413
     assert json.loads(body)["error"] == "lookup body too large"
 
-    code, body, _ = get(
-        base + "/api/v1/config", key="testkey", method="PUT",
-        body={"oversized": "x" * (2 << 20)},
+    # Declare a body just over the default limit, then close the write side
+    # after a short prefix. The handler must reject from Content-Length before
+    # trying to parse or buffer the full body. Sending a multi-megabyte payload
+    # with urllib makes the client race the server's intentional bounded drain
+    # and can fail with BrokenPipe before it reads the 413 response.
+    target = urlsplit(base)
+    declared_length = (2 << 20) + 1
+    with socket.create_connection(
+        (target.hostname, target.port), timeout=10
+    ) as client:
+        request = (
+            "PUT /api/v1/config HTTP/1.1\r\n"
+            "Host: localhost\r\n"
+            "X-Api-Key: testkey\r\n"
+            "Content-Type: application/json\r\n"
+            f"Content-Length: {declared_length}\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode() + b'{"oversized":'
+        client.sendall(request)
+        client.shutdown(socket.SHUT_WR)
+        response = bytearray()
+        while chunk := client.recv(65536):
+            response.extend(chunk)
+
+    response_headers, separator, response_body = bytes(response).partition(
+        b"\r\n\r\n"
     )
-    assert code == 413
-    assert json.loads(body)["error"] == "request body too large"
+    assert separator
+    assert int(response_headers.splitlines()[0].split()[1]) == 413
+    assert json.loads(response_body)["error"] == "request body too large"
 
 
 @pytest.mark.parametrize("framing", [
