@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.14.2] - 2026-10-07
+
+### User-facing changes
+
+#### Fixed
+
+- **Release Pipeline:** Encrypted backups now build across ROMarrNG's published container architectures, keeping the supported ARMv7 image available alongside AMD64 and ARM64.
+
+#### Security
+
+- **Backup:** ROMarr can now export and restore credential-inclusive backups as passphrase-encrypted AES-GCM envelopes, keeping API keys and download-client passwords unreadable in the saved file.
+
 ## [0.14.1] - 2026-10-06
 
 ### User-facing changes
