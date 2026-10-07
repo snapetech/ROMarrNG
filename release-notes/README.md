@@ -42,8 +42,11 @@ python scripts/release_notes.py preview --base origin/main --head HEAD
 ```
 
 For an internal-only change, check the internal-only option in the pull request
-template or put `release-note: none` in the pull request description. Direct
-pushes to `main` use the commit message for the same opt-out. User-facing
+template or put `release-note: none` in the pull request description. Also put
+that marker in the squash-merge commit body: the main-branch push check reads
+the commit message rather than the original pull request description. With
+`gh`, pass `--body "release-note: none"` when merging. Direct pushes to `main`
+use the commit message for the same opt-out. User-facing
 features, fixes, security changes, operational behavior changes, and user-facing
 documentation still need a fragment.
 
@@ -71,5 +74,5 @@ tag. The tag workflow publishes the release and sends
 the same release notes to Discord. `DISCORD_RELEASE_WEBHOOK` in the ROMarrNG
 repository must point to the same webhook as SeerrNG. The release-preparation
 commit itself is internal tooling work, so include `release-note: none` in its
-commit message for a direct push or in the pull request description when using a
-pull request.
+commit message for a direct push. When using a pull request, include the marker
+in both the pull request description and squash-merge commit body.
