@@ -481,11 +481,24 @@ def _seerr_request_view(service, request: SeerrRequest) -> dict:
             "catalogId": request.catalog_id,
             "platformId": request.platform_id,
         }
+    # Whether the finished file is in a configured library folder, which RomM
+    # reads. This says "placed", not "RomM has indexed it": RomM's own scan
+    # decides that, and ROMarrNG does not query RomM.
+    placement_target = (service.library_for(request.platform)
+                        or service.default_library())
+    rom_placement = {
+        "placed": bool(assets),
+        "library": (placement_target[0].get("name") or None)
+        if placement_target else None,
+        "layout": service.library_layout(placement_target[0])
+        if placement_target else None,
+    }
     return {
         "externalRequestId": request.external_request_id,
         # Generic external-platform clients use these stable, concise names;
         # the SeerrNG contract fields below remain unchanged.
         "request_id": request.external_request_id,
+        "rommPlacement": rom_placement,
         "name": request.game,
         "status": status,
         "stage": status,
