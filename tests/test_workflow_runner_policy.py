@@ -97,6 +97,19 @@ def _runner_policy_violations(workflow_dir: Path) -> list[str]:
 
 
 class WorkflowRunnerPolicyTests(unittest.TestCase):
+    def test_dependency_review_runs_use_pull_request_scoped_cancellation(self) -> None:
+        workflow = yaml.safe_load(
+            (WORKFLOW_DIR / "dependency-review.yml").read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(
+            workflow["concurrency"],
+            {
+                "group": "${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}",
+                "cancel-in-progress": True,
+            },
+        )
+
     def test_public_workflows_use_hosted_runners_except_trusted_main_job(self) -> None:
         self.assertEqual(
             _runner_policy_violations(WORKFLOW_DIR),
