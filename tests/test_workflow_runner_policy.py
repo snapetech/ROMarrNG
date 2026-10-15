@@ -143,5 +143,57 @@ class WorkflowRunnerPolicyTests(unittest.TestCase):
         self.assertIn("matrix.os must contain only hosted runner labels", violations[0])
 
 
+    def test_pool_python_runtime_is_private_and_distro_independent(self) -> None:
+        workflow = yaml.safe_load(
+            (WORKFLOW_DIR / "docker.yml").read_text(encoding="utf-8")
+        )
+        steps = workflow["jobs"]["test"]["steps"]
+        hosted_python = next(
+            step
+            for step in steps
+            if step.get("name") == "Set up Python 3.13 on GitHub-hosted runners"
+        )
+        self.assertEqual(hosted_python["if"], "runner.environment == 'github-hosted'")
+        self.assertEqual(
+            hosted_python["uses"],
+            "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+        )
+
+        setup_uv = next(
+            step
+            for step in steps
+            if step.get("name") == "Install uv for the self-hosted Python runtime"
+        )
+        self.assertEqual(setup_uv["if"], "runner.environment == 'self-hosted'")
+        self.assertEqual(
+            setup_uv["uses"],
+            "astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884",
+        )
+        self.assertEqual(setup_uv["with"]["version"], "0.13.0")
+        self.assertIs(setup_uv["with"]["enable-cache"], False)
+
+        private_python = next(
+            step
+            for step in steps
+            if step.get("name") == "Install Python 3.13 in private runner storage"
+        )
+        self.assertEqual(private_python["if"], "runner.environment == 'self-hosted'")
+        self.assertEqual(
+            private_python["env"]["UV_PYTHON_INSTALL_DIR"],
+            "${{ steps.private-runner-temp.outputs.path }}/python",
+        )
+        self.assertEqual(
+            private_python["env"]["UV_CACHE_DIR"],
+            "${{ steps.private-runner-temp.outputs.path }}/uv-cache",
+        )
+        self.assertIn("uv python install 3.13", private_python["run"])
+        self.assertIn("uv python find 3.13", private_python["run"])
+        self.assertIn(
+            '[[ "$python_bin" == "$UV_PYTHON_INSTALL_DIR/"* && -x "$python_bin" ]]',
+            private_python["run"],
+        )
+        self.assertIn('>> "$GITHUB_PATH"', private_python["run"])
+
+
 if __name__ == "__main__":
     unittest.main()

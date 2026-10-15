@@ -21,6 +21,8 @@ import threading
 import time
 import uuid
 from collections import deque
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -28,7 +30,7 @@ from typing import Any, Iterable
 from . import config
 from .trusted_sandbox import require_trusted_local_test_sandbox
 
-ENGINE_VERSION = 1
+ENGINE_VERSION = 2
 ROOT = Path(__file__).resolve().parents[2]
 INHERITED_ENVIRONMENT_KEYS = frozenset({
     "ASDF_DATA_DIR", "ASDF_DIR", "COMSPEC", "LANG", "LC_ALL", "LC_CTYPE",
@@ -49,6 +51,9 @@ PROGRESS_INTERVAL_SECONDS = 60
 MAX_OUTPUT_BYTES = 8 * 1024 * 1024
 MAX_LOG_BYTES = 16 * 1024 * 1024
 LOG_TRUNCATION_MARKER = b"\n[validation log truncated after 16 MiB]\n"
+_PARENT_ENVIRONMENT_LOCK = threading.Lock()
+_PARENT_ENVIRONMENT_LEASES = 0
+_PARENT_ENVIRONMENT_STATE: tuple[Any, int] | None = None
 
 
 class ValidationError(RuntimeError):
@@ -171,6 +176,8 @@ def inherited_toolchain_environment(inherited: dict[str, str] | None = None) -> 
 
 
 def validate_config() -> None:
+    if not isinstance(config.MAX_CONCURRENT_TASKS, int) or not 1 <= config.MAX_CONCURRENT_TASKS <= 8:
+        raise ValidationError("Validation max concurrency must be an integer from 1 through 8.")
     task_ids = [task.get("id") for task in config.TASKS]
     if any(
         not isinstance(item, str) or re.fullmatch(r"[a-z0-9][a-z0-9-]*", item) is None
@@ -181,7 +188,18 @@ def validate_config() -> None:
     if len(lane_ids) != len(config.INVENTORY):
         raise ValidationError("Test inventory lane IDs must be unique.")
     owned: set[str] = set()
+    stage_order: dict[str, int] = {}
+    previous_stage_index = -1
     for task in config.TASKS:
+        stage = task.get("stage")
+        concurrency_group = task.get("concurrency_group")
+        if not isinstance(stage, str) or not stage.strip() or not isinstance(concurrency_group, str) or not concurrency_group.strip():
+            raise ValidationError("Validation tasks need a nonempty stage and concurrency group: " + str(task.get("id")))
+        if stage not in stage_order:
+            stage_order[stage] = len(stage_order)
+        if stage_order[stage] < previous_stage_index:
+            raise ValidationError("Validation tasks must be ordered by stage: " + str(task.get("id")))
+        previous_stage_index = stage_order[stage]
         command = task.get("command")
         if not isinstance(command, list) or not command or any(not isinstance(item, str) or not item for item in command):
             raise ValidationError("Validation tasks must use a native executable and argument array: " + str(task.get("id")))
@@ -215,6 +233,11 @@ def validate_config() -> None:
         visited.add(task_id)
     for task_id in task_ids:
         visit(task_id)
+    by_id = {task["id"]: task for task in config.TASKS}
+    for task in config.TASKS:
+        for dependency in task.get("depends_on", []):
+            if stage_order[by_id[dependency]["stage"]] > stage_order[task["stage"]]:
+                raise ValidationError(f"Validation task depends on a later stage: {task['id']}/{dependency}")
     for rule in config.INVENTORY:
         if rule.get("required", True) and rule["id"] not in owned:
             raise ValidationError("Required test inventory has no registered task: " + rule["id"])
@@ -280,6 +303,7 @@ def create_plan(root: Path, options: dict[str, Any]) -> dict[str, Any]:
             "id": task["id"],
             "name": task["name"],
             "stage": task["stage"],
+            "concurrencyGroup": task["concurrency_group"],
             "kind": task["kind"],
             "selected": task["id"] in selected_ids,
             "command": task["command"],
@@ -328,6 +352,7 @@ def create_plan(root: Path, options: dict[str, Any]) -> dict[str, Any]:
         "prerequisites": prerequisites,
         "runtimes": [runtime],
         "executionContext": execution,
+        "maxConcurrentTasks": config.MAX_CONCURRENT_TASKS,
         "tasks": tasks,
     }
     body["planSha256"] = digest_bytes(stable_json(body).encode())
@@ -402,17 +427,25 @@ def parse_counts(task: dict[str, Any], output: str) -> dict[str, int]:
     raise ValidationError("No native result parser is registered for task: " + task["id"])
 
 
-def format_validation_progress(repository: str, tasks: list[dict[str, Any]], results: dict[str, dict[str, Any]], current_task: dict[str, Any] | None = None, elapsed_ms: int = 0) -> str:
+def format_validation_progress(
+    repository: str,
+    tasks: list[dict[str, Any]],
+    results: dict[str, dict[str, Any]],
+    running_tasks: dict[str, float] | None = None,
+) -> str:
     receipts = [results[task["id"]] for task in tasks if task["id"] in results]
     passed = sum(receipt["status"] == "passed" for receipt in receipts)
     failed = sum(receipt["status"] in {"failed", "incomplete"} for receipt in receipts)
     blocked = sum(receipt["status"] in {"blocked", "not-run"} for receipt in receipts)
     completed = passed + failed
     pending = max(0, len(tasks) - completed - blocked)
-    active = ""
-    if current_task is not None:
-        seconds = elapsed_ms // 1000
-        active = f"; running {current_task.get('name', current_task['id'])} ({seconds // 60}m{seconds % 60:02d}s)"
+    by_id = {task["id"]: task for task in tasks}
+    active_tasks = []
+    for task_id, started in (running_tasks or {}).items():
+        task = by_id.get(task_id, {"id": task_id})
+        seconds = max(0, int(time.monotonic() - started))
+        active_tasks.append(f"{task.get('name', task_id)} ({seconds // 60}m{seconds % 60:02d}s)")
+    active = f"; running {', '.join(active_tasks)}" if active_tasks else ""
     return f"[validation] {repository}: {completed}/{len(tasks)} selected tasks complete ({passed} passed, {failed} failed, {blocked} blocked, {pending} pending){active}"
 
 
@@ -481,11 +514,34 @@ def _restore_parent_environment(state: tuple[Any, int] | None) -> None:
         )
 
 
+@contextmanager
+def _parent_environment_protection():
+    """Hold one process-wide protection lease across concurrent task children."""
+    global _PARENT_ENVIRONMENT_LEASES, _PARENT_ENVIRONMENT_STATE
+    with _PARENT_ENVIRONMENT_LOCK:
+        if _PARENT_ENVIRONMENT_LEASES == 0:
+            _PARENT_ENVIRONMENT_STATE = _hide_parent_environment()
+        _PARENT_ENVIRONMENT_LEASES += 1
+    try:
+        yield
+    finally:
+        with _PARENT_ENVIRONMENT_LOCK:
+            _PARENT_ENVIRONMENT_LEASES -= 1
+            if _PARENT_ENVIRONMENT_LEASES == 0:
+                state = _PARENT_ENVIRONMENT_STATE
+                _PARENT_ENVIRONMENT_STATE = None
+                _restore_parent_environment(state)
+
+
 def run_task(root: Path, task: dict[str, Any], log_path: Path) -> dict[str, Any]:
+    with _parent_environment_protection():
+        return _run_task(root, task, log_path)
+
+
+def _run_task(root: Path, task: dict[str, Any], log_path: Path) -> dict[str, Any]:
     start = time.monotonic()
     started_at = utc_now()
     env = isolated_task_environment(task, log_path.parent)
-    dumpable_state = _hide_parent_environment()
     log_file = None
     state: dict[str, Any] = {
         "outputBytes": 0,
@@ -598,8 +654,6 @@ def run_task(root: Path, task: dict[str, Any], log_path: Path) -> dict[str, Any]
         if proc.stdout is not None:
             proc.stdout.close()
     finally:
-        # Keep the runner hidden for the entire child lifetime. Restore it only
-        # after the task exits so unrelated local tooling remains unaffected.
         try:
             if proc is not None and proc.poll() is None:
                 if os.name != "nt":
@@ -629,22 +683,19 @@ def run_task(root: Path, task: dict[str, Any], log_path: Path) -> dict[str, Any]
                         pass
                 reader.join()
         finally:
-            try:
-                _restore_parent_environment(dumpable_state)
-            finally:
-                if log_file is not None:
+            if log_file is not None:
+                try:
+                    if state["logTruncated"] and state["logError"] is None:
+                        log_file.write(LOG_TRUNCATION_MARKER)
+                    log_file.flush()
+                    os.fsync(log_file.fileno())
+                except OSError as error:
+                    state["logError"] = state["logError"] or str(error)
+                finally:
                     try:
-                        if state["logTruncated"] and state["logError"] is None:
-                            log_file.write(LOG_TRUNCATION_MARKER)
-                        log_file.flush()
-                        os.fsync(log_file.fileno())
+                        log_file.close()
                     except OSError as error:
                         state["logError"] = state["logError"] or str(error)
-                    finally:
-                        try:
-                            log_file.close()
-                        except OSError as error:
-                            state["logError"] = state["logError"] or str(error)
     output_bytes = b"".join(state["tailChunks"])
     output = output_bytes.decode("utf-8", "replace")
     counts = parse_counts(task, output) if task.get("kind") == "test" else {"passed": 0, "skipped": 0, "failed": 0, "excluded": 0}
@@ -706,6 +757,166 @@ def release_lock(lock: tuple[Path, str]) -> None:
         pass
 
 
+def run_task_pool(
+    tasks: list[dict[str, Any]],
+    *,
+    max_concurrent_tasks: int,
+    results: dict[str, dict[str, Any]],
+    execute_task: Any,
+    check_source: Any,
+    on_task_start: Any = None,
+    on_task_finish: Any = None,
+    on_progress: Any = None,
+    state_lock: Any = None,
+) -> bool:
+    if not isinstance(max_concurrent_tasks, int) or not 1 <= max_concurrent_tasks <= 8:
+        raise ValidationError("Validation max concurrency must be an integer from 1 through 8.")
+    if not callable(execute_task) or not callable(check_source):
+        raise ValidationError("The task pool requires an executor and source check.")
+    on_task_start = on_task_start or (lambda task, started: None)
+    on_task_finish = on_task_finish or (lambda task, result: None)
+    on_progress = on_progress or (lambda: None)
+    state_lock = state_lock or threading.RLock()
+    pending = list(tasks)
+    selected_ids = {task["id"] for task in pending}
+    if len(selected_ids) != len(pending):
+        raise ValidationError("The task pool received duplicate task IDs.")
+    stage_order = {stage: index for index, stage in enumerate(dict.fromkeys(
+        task.get("stage", "default") for task in pending
+    ))}
+    active: dict[Future, dict[str, Any]] = {}
+    active_started: dict[Future, tuple[str, float]] = {}
+    active_groups: set[str] = set()
+    source_changed = False
+
+    def metadata(task: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "stage": task.get("stage", "default"),
+            "concurrencyGroup": task.get("concurrencyGroup", task["id"]),
+            "dependsOn": task.get("dependsOn", []),
+        }
+
+    def block(task: dict[str, Any], reason: str) -> None:
+        with state_lock:
+            results[task["id"]] = {
+                "taskId": task["id"],
+                **metadata(task),
+                "status": "blocked",
+                "reason": reason,
+                "required": task.get("required", True),
+            }
+
+    def invalidate_passes(reason: str) -> None:
+        with state_lock:
+            for task_id, result in list(results.items()):
+                if result.get("status") == "passed":
+                    results[task_id] = {
+                        **result,
+                        "status": "blocked",
+                        "reason": reason,
+                    }
+
+    def source_is_current() -> bool:
+        try:
+            return bool(check_source())
+        except Exception:
+            return False
+
+    with ThreadPoolExecutor(max_workers=max_concurrent_tasks, thread_name_prefix="romarr-validation") as pool:
+        while pending or active:
+            if not source_changed and not source_is_current():
+                source_changed = True
+                invalidate_passes("candidate source changed during validation")
+                for task in pending:
+                    block(task, "candidate source changed before the task started")
+                pending.clear()
+                on_progress()
+
+            for task in pending[:]:
+                unavailable = next((dependency for dependency in task.get("dependsOn", [])
+                                    if dependency not in selected_ids or
+                                    (dependency in results and results[dependency].get("status") != "passed")), None)
+                if unavailable is not None:
+                    block(task, "required dependency did not pass")
+                    pending.remove(task)
+                    on_progress()
+
+            unfinished = pending + list(active.values())
+            if unfinished and not source_changed:
+                stage = min(
+                    (task.get("stage", "default") for task in unfinished),
+                    key=lambda item: stage_order.get(item, len(stage_order)),
+                )
+                groups = set(active_groups)
+                for task in pending[:]:
+                    if len(active) >= max_concurrent_tasks:
+                        break
+                    if task.get("stage", "default") != stage:
+                        continue
+                    if any(results.get(dependency, {}).get("status") != "passed"
+                           for dependency in task.get("dependsOn", [])):
+                        continue
+                    group = task.get("concurrencyGroup", task["id"])
+                    if group in groups:
+                        continue
+                    pending.remove(task)
+                    groups.add(group)
+                    started = time.monotonic()
+                    on_task_start(task, started)
+                    future = pool.submit(execute_task, task)
+                    active[future] = task
+                    active_started[future] = (utc_now(), started)
+                    active_groups.add(group)
+                    on_progress()
+
+            if not active:
+                if pending:
+                    for task in pending:
+                        block(task, "required dependency did not pass or no task is runnable")
+                    pending.clear()
+                    on_progress()
+                break
+
+            completed, _ = wait(active, return_when=FIRST_COMPLETED)
+            for future in completed:
+                task = active.pop(future)
+                started_at, started = active_started.pop(future)
+                group = task.get("concurrencyGroup", task["id"])
+                active_groups.remove(group)
+                try:
+                    result = future.result()
+                    if not isinstance(result, dict) or result.get("taskId") != task["id"] or result.get("status") not in {
+                        "passed", "failed", "incomplete", "blocked", "not-run",
+                    }:
+                        raise ValidationError("Task returned an invalid result receipt.")
+                except Exception as error:
+                    result = {
+                        "taskId": task["id"],
+                        "status": "failed",
+                        "error": str(error),
+                        "startedAt": started_at,
+                        "durationMs": int((time.monotonic() - started) * 1000),
+                        "required": task.get("required", True),
+                    }
+                with state_lock:
+                    results[task["id"]] = {**result, **metadata(task)}
+                    task_result = results[task["id"]]
+                on_task_finish(task, task_result)
+                on_progress()
+
+            if not source_changed and not source_is_current():
+                source_changed = True
+                invalidate_passes("candidate source changed during concurrent task execution")
+                for task in pending:
+                    block(task, "candidate source changed during task execution")
+                pending.clear()
+                on_progress()
+
+    if source_changed:
+        invalidate_passes("candidate source changed during validation")
+    return source_changed
+
+
 def execute(root: Path, plan: dict[str, Any], on_progress: Any = None) -> tuple[dict[str, Any], Path, int]:
     plan_body = dict(plan)
     plan_digest = plan_body.pop("planSha256", None)
@@ -727,17 +938,22 @@ def execute(root: Path, plan: dict[str, Any], on_progress: Any = None) -> tuple[
             by_id[task["id"]] = {"taskId": task["id"], "status": "excluded", "reason": plan["selection"], "required": task.get("required", True)}
 
     progress_state: dict[str, str] = {}
+    running_tasks: dict[str, float] = {}
+    progress_lock = threading.RLock()
 
-    def report_progress(current_task: dict[str, Any] | None = None, started: float = 0.0) -> None:
+    def report_progress() -> None:
         if on_progress is None:
             return
-        elapsed_ms = int((time.monotonic() - started) * 1000) if current_task is not None else 0
-        summary = format_validation_progress(config.REPOSITORY, selected, by_id, current_task, elapsed_ms)
-        if progress_state.get("last") == summary:
-            return
-        progress_state["last"] = summary
+        with progress_lock:
+            running_snapshot = dict(running_tasks)
+            results_snapshot = dict(by_id)
+            summary = format_validation_progress(config.REPOSITORY, selected, results_snapshot, running_snapshot)
+            if progress_state.get("last") == summary:
+                return
+            progress_state["last"] = summary
         on_progress(summary)
 
+    source_changed = False
     if missing:
         for task in selected:
             by_id[task["id"]] = {"taskId": task["id"], "status": "not-run", "reason": "required command or runtime is unavailable", "required": task.get("required", True)}
@@ -745,53 +961,58 @@ def execute(root: Path, plan: dict[str, Any], on_progress: Any = None) -> tuple[
         receipt = make_receipt(plan, run_id, started_at, by_id, run_root, missing)
         return receipt, run_root, 1
 
-    source_changed = False
-    for task in selected:
-        failed_dependency = next((by_id.get(dependency) for dependency in task.get("dependsOn", []) if by_id.get(dependency, {}).get("status") != "passed"), None)
-        if failed_dependency:
-            by_id[task["id"]] = {"taskId": task["id"], "status": "blocked", "reason": "dependency did not pass", "required": True}
-            report_progress()
-            continue
-        if capture_candidate(root, config.INPUTS, plan["inventory"])["sourceSha256"] != plan["candidate"]["sourceSha256"]:
-            by_id[task["id"]] = {"taskId": task["id"], "status": "blocked", "reason": "candidate source changed after planning", "required": True}
-            report_progress()
-            source_changed = True
-            break
-        configured = next(item for item in config.TASKS if item["id"] == task["id"])
-        venv = run_root / "venv"
-        python_bin = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        command = [
-            item.replace("{VENV}", str(venv)).replace("{PYTHON}", str(python_bin))
-            for item in configured["command"]
-        ]
-        executable_task = {**configured, "command": command}
-        if configured["id"] == "install-test-dependencies":
-            executable_task["env"] = {"PIP_NO_CACHE_DIR": "1"}
-        task_started = time.monotonic()
-        report_progress(task, task_started)
+    else:
+        def execute_task(task: dict[str, Any]) -> dict[str, Any]:
+            configured = next(item for item in config.TASKS if item["id"] == task["id"])
+            venv = run_root / "venv"
+            python_bin = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            command = [
+                item.replace("{VENV}", str(venv)).replace("{PYTHON}", str(python_bin))
+                for item in configured["command"]
+            ]
+            executable_task = {**configured, "command": command}
+            if configured["id"] == "install-test-dependencies":
+                executable_task["env"] = {"PIP_NO_CACHE_DIR": "1"}
+            result = run_task(root, executable_task, run_root / (task["id"] + ".log"))
+            result["inventory"] = [{
+                "lane": lane,
+                "discoveredFiles": plan["inventoryCounts"].get(lane, 0),
+                "inventorySha256": plan["inventoryLaneDigests"][lane],
+            } for lane in configured.get("inventory_lanes", [])]
+            return result
+
+        def task_started(task: dict[str, Any], started: float) -> None:
+            with progress_lock:
+                running_tasks[task["id"]] = started
+
+        def task_finished(task: dict[str, Any], _result: dict[str, Any]) -> None:
+            with progress_lock:
+                running_tasks.pop(task["id"], None)
+
         heartbeat_stop = threading.Event()
 
         def heartbeat() -> None:
             while not heartbeat_stop.wait(PROGRESS_INTERVAL_SECONDS):
-                report_progress(task, task_started)
+                report_progress()
 
         heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
         heartbeat_thread.start()
         try:
-            result = run_task(root, executable_task, run_root / (task["id"] + ".log"))
+            with _parent_environment_protection():
+                source_changed = run_task_pool(
+                    selected,
+                    max_concurrent_tasks=plan["maxConcurrentTasks"],
+                    results=by_id,
+                    execute_task=execute_task,
+                    check_source=lambda: capture_candidate(root, config.INPUTS, plan["inventory"])["sourceSha256"] == plan["candidate"]["sourceSha256"],
+                    on_task_start=task_started,
+                    on_task_finish=task_finished,
+                    on_progress=report_progress,
+                    state_lock=progress_lock,
+                )
         finally:
             heartbeat_stop.set()
             heartbeat_thread.join()
-        result["inventory"] = [{
-            "lane": lane,
-            "discoveredFiles": plan["inventoryCounts"].get(lane, 0),
-            "inventorySha256": plan["inventoryLaneDigests"][lane],
-        } for lane in configured.get("inventory_lanes", [])]
-        by_id[task["id"]] = result
-        report_progress()
-        if capture_candidate(root, config.INPUTS, plan["inventory"])["sourceSha256"] != plan["candidate"]["sourceSha256"]:
-            source_changed = True
-            break
     for task in plan["tasks"]:
         if task["id"] not in by_id:
             by_id[task["id"]] = {"taskId": task["id"], "status": "blocked" if source_changed else "excluded", "reason": "candidate source changed during execution" if source_changed else "not selected", "required": True}
@@ -828,6 +1049,7 @@ def make_receipt(plan: dict[str, Any], run_id: str, started_at: str, by_id: dict
         "inventoryCounts": plan["inventoryCounts"],
         "inventoryLaneDigests": plan["inventoryLaneDigests"],
         "executionContext": plan["executionContext"],
+        "maxConcurrentTasks": plan["maxConcurrentTasks"],
         "status": status,
         "prerequisites": {"missing": missing, "sourceChanged": source_changed},
         "runtimes": plan["runtimes"],
@@ -839,7 +1061,9 @@ def make_receipt(plan: dict[str, Any], run_id: str, started_at: str, by_id: dict
     return receipt
 
 
-def export_receipt(receipt: dict[str, Any], destination: str) -> None:
+def export_receipt(
+    receipt: dict[str, Any], destination: str, evidence_directory: Path
+) -> None:
     raw_target = Path(destination).absolute()
     if raw_target.is_symlink():
         raise ValidationError("Validation receipt export cannot replace a symbolic link.")
@@ -849,8 +1073,19 @@ def export_receipt(receipt: dict[str, Any], destination: str) -> None:
         roots.append(Path(os.environ["RUNNER_TEMP"]).resolve())
     if not any(target != root and root in target.parents for root in roots):
         raise ValidationError("Validation receipts may only be exported beneath a system or runner temporary directory.")
+    raw_evidence = evidence_directory.absolute()
+    if raw_evidence.is_symlink():
+        raise ValidationError("Validation evidence cannot be exported from a symbolic link.")
+    evidence = raw_evidence.resolve(strict=True)
+    if not evidence.is_dir():
+        raise ValidationError("Validation evidence is not a directory.")
+    if not any(evidence != root and root in evidence.parents for root in roots):
+        raise ValidationError(
+            "Validation evidence may only be exported from a system or runner temporary directory."
+)
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    target.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    exported_receipt = {**receipt, "evidenceDirectory": str(evidence)}
+    target.write_text(json.dumps(exported_receipt, indent=2) + "\n", encoding="utf-8")
     os.chmod(target, 0o600)
 
 
@@ -889,7 +1124,7 @@ def main(argv: list[str] | None = None) -> int:
         release_lock(lock)
     export_path = os.environ.get("VALIDATION_RECEIPT_EXPORT")
     if export_path:
-        export_receipt(receipt, export_path)
+        export_receipt(receipt, export_path, run_root)
     summary = {
         "repository": receipt["repository"],
         "status": receipt["status"],

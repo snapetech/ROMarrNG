@@ -75,9 +75,34 @@ jobs:
           PRIVATE_RUNNER_TEMP_PREFIX: romarr
         run: ./scripts/prepare-private-runner-temp.sh
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: Set up Python 3.13 on GitHub-hosted runners
+        if: runner.environment == 'github-hosted'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
+
+      # setup-python's Linux builds target GitHub-hosted distributions. The Arch pool
+      # runner installs a managed interpreter beneath this job's private temp path.
+      - name: Install uv for the self-hosted Python runtime
+        if: runner.environment == 'self-hosted'
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          enable-cache: false
+
+      - name: Install Python 3.13 in private runner storage
+        if: runner.environment == 'self-hosted'
+        env:
+          UV_CACHE_DIR: ${{ steps.private-runner-temp.outputs.path }}/uv-cache
+          UV_PYTHON_INSTALL_DIR: ${{ steps.private-runner-temp.outputs.path }}/python
+        run: |
+          set -euo pipefail
+          umask 077
+          uv python install 3.13
+          python_bin="$(uv python find 3.13)"
+          [[ "$python_bin" == "$UV_PYTHON_INSTALL_DIR/"* && -x "$python_bin" ]]
+          printf '%s\n' "$(dirname "$python_bin")" >> "$GITHUB_PATH"
+          "$python_bin" --version
 
       - name: Run source-bound pytest validation
         env:
@@ -85,12 +110,22 @@ jobs:
           VALIDATION_RECEIPT_EXPORT: ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation/pytest.json
         run: python3.13 -m scripts.validation_engine.engine --tests-only
 
-      - name: Retain pytest validation receipt
+      - name: Stage failed pytest task logs
+        if: always()
+        env:
+          PRIVATE_RUNNER_TEMP: ${{ steps.private-runner-temp.outputs.path || runner.temp }}
+          VALIDATION_RECEIPT_EXPORT: ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation/pytest.json
+        run: python3.13 -m scripts.validation_engine.retain_failed_pytest_logs
+
+      - name: Retain pytest validation receipt and failed task logs
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: romarrng-validation-receipt-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation/pytest.json
+          path: |
+            ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation/pytest.json
+            ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation/failed-task-logs/manifest.json
+            ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation/failed-task-logs/*.log
           if-no-files-found: warn
           retention-days: 7
   validation-environment-portability:

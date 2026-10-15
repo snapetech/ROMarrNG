@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
 
-from scripts.validation_engine import engine
+from scripts.validation_engine import config, engine
 from scripts.validation_engine.engine import (
     ValidationError,
     acquire_lock,
@@ -23,8 +26,11 @@ from scripts.validation_engine.engine import (
     parse_counts,
     release_lock,
     run_task,
+    run_task_pool,
 )
 from scripts.validation_engine.reconcile import reconcile_receipts
+from scripts.validation_engine import run_pytest_shard
+from scripts.validation_engine.run_pytest_shard import shard_files
 from scripts.validation_engine.trusted_sandbox import require_trusted_local_test_sandbox
 
 
@@ -84,7 +90,7 @@ def test_pytest_summary_counts_passed_skipped_failures_and_network_deselection()
     assert failed["failed"] == 3
 
 
-def test_live_progress_summary_reports_completed_and_active_tasks() -> None:
+def test_live_progress_summary_reports_completed_and_active_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
     tasks = [
         {"id": "passed", "name": "Passed task"},
         {"id": "blocked", "name": "Blocked task"},
@@ -94,10 +100,274 @@ def test_live_progress_summary_reports_completed_and_active_tasks() -> None:
         "passed": {"status": "passed", "startedAt": "2026-10-12T00:00:00Z"},
         "blocked": {"status": "blocked"},
     }
-    assert format_validation_progress("sample", tasks, results, tasks[2], 65_000) == (
+    monkeypatch.setattr(engine.time, "monotonic", lambda: 100.0)
+    assert format_validation_progress("sample", tasks, results, {"running": 35.0}) == (
         "[validation] sample: 1/3 selected tasks complete "
         "(1 passed, 0 failed, 1 blocked, 1 pending); running Long task (1m05s)"
     )
+
+
+def test_live_progress_summary_lists_every_active_task(monkeypatch: pytest.MonkeyPatch) -> None:
+    tasks = [
+        {"id": "first", "name": "First shard"},
+        {"id": "second", "name": "Second shard"},
+    ]
+    monkeypatch.setattr(engine.time, "monotonic", lambda: 120.0)
+    assert format_validation_progress("sample", tasks, {}, {"first": 10.0, "second": 60.0}) == (
+        "[validation] sample: 0/2 selected tasks complete "
+        "(0 passed, 0 failed, 0 blocked, 2 pending); "
+        "running First shard (1m50s), Second shard (1m00s)"
+    )
+
+
+def test_pytest_shards_cover_every_inventory_file_once() -> None:
+    from scripts.validation_engine.engine import ROOT
+
+    shards = [shard_files(ROOT, shard["letters"]) for shard in config.PYTEST_SHARDS]
+    flattened = [relative for shard in shards for relative in shard]
+    expected = sorted(path.relative_to(ROOT).as_posix() for path in ROOT.glob("tests/test_*.py"))
+    assert sorted(flattened) == expected
+    assert len(flattened) == len(set(flattened))
+    assert [rule["id"] for rule in config.INVENTORY] == [f"pytest-shard-{item['id']}" for item in config.PYTEST_SHARDS]
+
+
+def test_pytest_shard_selection_rejects_invalid_and_empty_shards(tmp_path: Path) -> None:
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_a.py").write_text("def test_ok(): pass\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="unique lowercase filename letters"):
+        shard_files(tmp_path, "aa")
+    with pytest.raises(ValueError, match="unique lowercase filename letters"):
+        shard_files(tmp_path, "A")
+    with pytest.raises(ValueError, match="did not select any test files"):
+        shard_files(tmp_path, "z")
+
+
+def test_pytest_shard_runner_exposes_candidate_package_to_collection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    package = tmp_path / "romarr"
+    package.mkdir()
+    (package / "__init__.py").write_text("ORIGIN = 'candidate-root'\n", encoding="utf-8")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_runner.py").write_text("def test_placeholder(): pass\n", encoding="utf-8")
+    repository_root = str(tmp_path.resolve())
+    monkeypatch.setattr(run_pytest_shard, "ROOT", tmp_path)
+    monkeypatch.setattr(sys, "path", [
+        entry for entry in sys.path if Path(entry or ".").resolve() != tmp_path.resolve()
+    ])
+    monkeypatch.delitem(sys.modules, "romarr", raising=False)
+    imported: list[str] = []
+
+    def collect_with_candidate_import_path(_args: list[str]) -> int:
+        imported.append(importlib.import_module("romarr").ORIGIN)
+        return 0
+
+    monkeypatch.setattr(run_pytest_shard.pytest, "main", collect_with_candidate_import_path)
+
+    assert run_pytest_shard.main(["r"]) == 0
+    assert imported == ["candidate-root"]
+    assert sys.path[0] == repository_root
+
+
+def test_bounded_task_pool_runs_independent_tasks_concurrently() -> None:
+    tasks = [
+        {"id": f"shard-{index}", "stage": "repository", "concurrencyGroup": f"shard-{index}"}
+        for index in range(4)
+    ]
+    barrier = threading.Barrier(2)
+    active = 0
+    maximum_active = 0
+    lock = threading.Lock()
+
+    def execute(task: dict) -> dict:
+        nonlocal active, maximum_active
+        with lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+        try:
+            barrier.wait(timeout=5)
+            return {"taskId": task["id"], "status": "passed"}
+        finally:
+            with lock:
+                active -= 1
+
+    results: dict[str, dict] = {}
+    changed = run_task_pool(
+        tasks,
+        max_concurrent_tasks=2,
+        results=results,
+        execute_task=execute,
+        check_source=lambda: True,
+    )
+    assert changed is False
+    assert maximum_active == 2
+    assert [results[task["id"]]["status"] for task in tasks] == ["passed"] * 4
+    assert [results[task["id"]]["concurrencyGroup"] for task in tasks] == [task["id"] for task in tasks]
+
+
+def test_bounded_task_pool_serializes_tasks_in_a_shared_concurrency_group() -> None:
+    tasks = [
+        {"id": "first", "stage": "repository", "concurrencyGroup": "shared"},
+        {"id": "second", "stage": "repository", "concurrencyGroup": "shared"},
+    ]
+    active = 0
+    maximum_active = 0
+    lock = threading.Lock()
+
+    def execute(task: dict) -> dict:
+        nonlocal active, maximum_active
+        with lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+        try:
+            time.sleep(0.02)
+            return {"taskId": task["id"], "status": "passed"}
+        finally:
+            with lock:
+                active -= 1
+
+    results: dict[str, dict] = {}
+    run_task_pool(
+        tasks,
+        max_concurrent_tasks=2,
+        results=results,
+        execute_task=execute,
+        check_source=lambda: True,
+    )
+    assert maximum_active == 1
+    assert all(result["status"] == "passed" for result in results.values())
+
+
+def test_bounded_task_pool_blocks_failed_dependencies_and_continues_independent_work() -> None:
+    tasks = [
+        {"id": "contract", "stage": "repository", "concurrencyGroup": "contract"},
+        {"id": "dependent", "stage": "repository", "concurrencyGroup": "dependent", "dependsOn": ["contract"]},
+        {"id": "independent", "stage": "repository", "concurrencyGroup": "independent"},
+    ]
+    started: list[str] = []
+    results: dict[str, dict] = {}
+
+    def execute(task: dict) -> dict:
+        started.append(task["id"])
+        return {"taskId": task["id"], "status": "failed" if task["id"] == "contract" else "passed"}
+
+    run_task_pool(
+        tasks,
+        max_concurrent_tasks=2,
+        results=results,
+        execute_task=execute,
+        check_source=lambda: True,
+    )
+    assert sorted(started) == ["contract", "independent"]
+    assert results["dependent"]["status"] == "blocked"
+    assert results["independent"]["status"] == "passed"
+
+
+def test_bounded_task_pool_finishes_a_stage_before_starting_the_next() -> None:
+    tasks = [
+        {"id": "prepare-slow", "stage": "prepare", "concurrencyGroup": "slow"},
+        {"id": "prepare-fast", "stage": "prepare", "concurrencyGroup": "fast"},
+        {"id": "tests", "stage": "repository", "concurrencyGroup": "tests"},
+    ]
+    slow_started = threading.Event()
+    fast_finished = threading.Event()
+    release_slow = threading.Event()
+    later_stage_started = threading.Event()
+    started_too_early = []
+    results: dict[str, dict] = {}
+
+    def execute(task: dict) -> dict:
+        if task["id"] == "prepare-slow":
+            slow_started.set()
+            if not release_slow.wait(timeout=5):
+                raise TimeoutError("slow preparation did not finish")
+        elif task["id"] == "prepare-fast":
+            fast_finished.set()
+        else:
+            started_too_early.append(not release_slow.is_set())
+            later_stage_started.set()
+        return {"taskId": task["id"], "status": "passed"}
+
+    def release_after_fast_prepare() -> None:
+        assert slow_started.wait(timeout=5)
+        assert fast_finished.wait(timeout=5)
+        time.sleep(0.03)
+        started_too_early.append(later_stage_started.is_set())
+        release_slow.set()
+
+    releaser = threading.Thread(target=release_after_fast_prepare)
+    releaser.start()
+    run_task_pool(
+        tasks,
+        max_concurrent_tasks=2,
+        results=results,
+        execute_task=execute,
+        check_source=lambda: True,
+    )
+    releaser.join(timeout=5)
+    assert not releaser.is_alive()
+    assert started_too_early == [False, False]
+    assert all(results[task["id"]]["status"] == "passed" for task in tasks)
+
+
+def test_bounded_task_pool_invalidates_passes_when_source_changes() -> None:
+    tasks = [
+        {"id": "first", "stage": "repository", "concurrencyGroup": "first"},
+        {"id": "second", "stage": "repository", "concurrencyGroup": "second"},
+    ]
+    source_checks = 0
+    results: dict[str, dict] = {}
+
+    def current_source() -> bool:
+        nonlocal source_checks
+        source_checks += 1
+        return source_checks == 1
+
+    changed = run_task_pool(
+        tasks,
+        max_concurrent_tasks=2,
+        results=results,
+        execute_task=lambda task: {"taskId": task["id"], "status": "passed"},
+        check_source=current_source,
+    )
+    assert changed is True
+    assert [results[task["id"]]["status"] for task in tasks] == ["blocked", "blocked"]
+
+
+def test_parent_environment_stays_protected_until_all_concurrent_leases_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    monkeypatch.setattr(engine, "_hide_parent_environment", lambda: events.append("hide") or ("fake-libc", 1))
+    monkeypatch.setattr(engine, "_restore_parent_environment", lambda state: events.append("restore"))
+    first_started = threading.Event()
+    second_started = threading.Event()
+    release_first = threading.Event()
+    release_second = threading.Event()
+
+    def task(started: threading.Event, release: threading.Event) -> None:
+        with engine._parent_environment_protection():
+            started.set()
+            if not release.wait(timeout=5):
+                raise TimeoutError("task lease was not released")
+
+    with engine._parent_environment_protection():
+        first = threading.Thread(target=task, args=(first_started, release_first))
+        second = threading.Thread(target=task, args=(second_started, release_second))
+        first.start()
+        second.start()
+        assert first_started.wait(timeout=5)
+        assert second_started.wait(timeout=5)
+        release_first.set()
+        first.join(timeout=5)
+        assert not first.is_alive()
+        assert events == ["hide"]
+        release_second.set()
+        second.join(timeout=5)
+        assert not second.is_alive()
+        assert events == ["hide"]
+    assert events == ["hide", "restore"]
 
 
 def test_local_test_execution_requires_matching_outer_sandbox_marker(tmp_path: Path) -> None:
@@ -416,24 +686,38 @@ def test_read_only_test_plan_discovers_repository_pytest_inventory() -> None:
 
     plan = create_plan(ROOT, {"tests_only": True})
     assert plan["selection"] == "tests-only"
-    assert plan["inventoryCounts"]["pytest-suite"] >= 100
+    assert sum(plan["inventoryCounts"].values()) >= 100
+    assert all(count > 0 for count in plan["inventoryCounts"].values())
     assert plan["tasks"][0]["selected"] is True
+    assert plan["maxConcurrentTasks"] == 2
+    test_tasks = [task for task in plan["tasks"] if task["kind"] == "test"]
+    assert len(test_tasks) == len(config.PYTEST_SHARDS)
+    assert all(task["selected"] and task["dependsOn"] == ["install-test-dependencies"] for task in test_tasks)
+    assert len({task["concurrencyGroup"] for task in test_tasks}) == len(test_tasks)
     assert plan["runtimes"][0]["command"] == "python3.13"
 
 
 def make_ci_receipt(run_attempt: str = "1") -> dict:
     sha = "a" * 40
     digest = "b" * 64
-    task = {
-        "taskId": "pytest-suite",
-        "status": "passed",
-        "activeCases": 100,
-        "skippedCases": 2,
-        "excludedCases": 10,
-        "inventory": [{"lane": "pytest-suite", "discoveredFiles": 103, "inventorySha256": digest}],
-    }
+    counts = [27, 31, 25, 28]
+    tasks = []
+    inventory_counts = {}
+    inventory_digests = {}
+    for shard, count in zip(config.PYTEST_SHARDS, counts, strict=True):
+        task_id = f"pytest-shard-{shard['id']}"
+        inventory_counts[task_id] = count
+        inventory_digests[task_id] = digest
+        tasks.append({
+            "taskId": task_id,
+            "status": "passed",
+            "activeCases": 25,
+            "skippedCases": 1 if shard["id"] == config.PYTEST_SHARDS[0]["id"] else 0,
+            "excludedCases": 10 if shard["id"] == config.PYTEST_SHARDS[0]["id"] else 0,
+            "inventory": [{"lane": task_id, "discoveredFiles": count, "inventorySha256": digest}],
+        })
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "repository": "romarrng",
         "selection": "tests-only",
         "candidate": {"commit": sha, "tree": "c" * 40, "sourceSha256": "d" * 64, "inventorySha256": "e" * 64},
@@ -444,10 +728,11 @@ def make_ci_receipt(run_attempt: str = "1") -> dict:
             "github": {"runId": "41", "runAttempt": run_attempt, "sha": sha},
         },
         "status": "passed",
-        "inventoryCounts": {"pytest-suite": 103},
-        "inventoryLaneDigests": {"pytest-suite": digest},
-        "tasks": [task],
-        "totals": {"activeCases": 100},
+        "maxConcurrentTasks": config.MAX_CONCURRENT_TASKS,
+        "inventoryCounts": inventory_counts,
+        "inventoryLaneDigests": inventory_digests,
+        "tasks": tasks,
+        "totals": {"activeCases": 100, "skippedCases": 1, "excludedCases": 10},
         "completedAt": "2026-10-11T00:00:00+00:00",
     }
 
@@ -457,8 +742,17 @@ def test_receipt_reconciler_binds_run_attempt_source_and_inventory() -> None:
     summary = reconcile_receipts([receipt], "41", "1", "a" * 40)
     assert summary["activeCases"] == 100
     assert summary["excludedCases"] == 10
+    assert summary["inventoryFiles"] == 111
     with pytest.raises(ValidationError, match="different workflow run or attempt"):
         reconcile_receipts([receipt], "41", "2", "a" * 40)
-    receipt["inventoryLaneDigests"]["pytest-suite"] = "f" * 64
+    lane = f"pytest-shard-{config.PYTEST_SHARDS[0]['id']}"
+    receipt["inventoryLaneDigests"][lane] = "f" * 64
     with pytest.raises(ValidationError, match="does not attest"):
+        reconcile_receipts([receipt], "41", "1", "a" * 40)
+
+
+def test_receipt_reconciler_requires_every_shard_to_pass() -> None:
+    receipt = make_ci_receipt()
+    receipt["tasks"].pop()
+    with pytest.raises(ValidationError, match="every test shard"):
         reconcile_receipts([receipt], "41", "1", "a" * 40)

@@ -12,8 +12,7 @@ from . import config
 from .engine import ROOT, ValidationError, capture_candidate, inventory_files
 
 NODE_ID = "romarrng-pytest-linux"
-TASK_ID = "pytest-suite"
-LANE_ID = "pytest-suite"
+TASK_IDS = tuple(f"pytest-shard-{shard['id']}" for shard in config.PYTEST_SHARDS)
 
 
 def reconcile_receipts(receipts: list[dict[str, Any]], run_id: str, run_attempt: str, sha: str, current_candidate: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -24,15 +23,30 @@ def reconcile_receipts(receipts: list[dict[str, Any]], run_id: str, run_attempt:
     receipt = receipts[0]
     context = receipt.get("executionContext") or {}
     github = context.get("github") or {}
-    task = next((item for item in receipt.get("tasks", []) if item.get("taskId") == TASK_ID), None)
-    if receipt.get("schemaVersion") != 1 or receipt.get("repository") != "romarrng":
+    tasks = receipt.get("tasks", [])
+    tasks_by_id = {item.get("taskId"): item for item in tasks}
+    if receipt.get("schemaVersion") != 2 or receipt.get("repository") != "romarrng":
         raise ValidationError("Receipt schema or repository does not match ROMarrNG.")
-    if receipt.get("status") != "passed" or task is None or task.get("status") != "passed":
-        raise ValidationError("Pytest node did not record a passing test task.")
-    cases = task.get("activeCases")
-    if not isinstance(cases, int) or cases < 1 or receipt.get("totals", {}).get("activeCases", 0) < cases:
-        raise ValidationError("Pytest node has no positive passing case count.")
-    if receipt.get("selection") not in {"tests-only", "task:" + TASK_ID}:
+    if receipt.get("maxConcurrentTasks") != config.MAX_CONCURRENT_TASKS:
+        raise ValidationError("Receipt does not attest the configured bounded task pool.")
+    if receipt.get("status") != "passed" or len(tasks_by_id) != len(tasks) or any(
+        task_id not in tasks_by_id or tasks_by_id[task_id].get("status") != "passed"
+        for task_id in TASK_IDS
+    ):
+        raise ValidationError("Pytest node did not record passing receipts for every test shard.")
+    shard_tasks = [tasks_by_id[task_id] for task_id in TASK_IDS]
+    cases_by_task = [task.get("activeCases") for task in shard_tasks]
+    if any(not isinstance(cases, int) or cases < 1 for cases in cases_by_task):
+        raise ValidationError("Pytest node has a shard with no positive passing case count.")
+    cases = sum(cases_by_task)
+    totals = receipt.get("totals", {})
+    if totals.get("activeCases") != cases:
+        raise ValidationError("Pytest node aggregate case count does not match its shard receipts.")
+    skipped = sum(task.get("skippedCases", 0) for task in shard_tasks)
+    excluded = sum(task.get("excludedCases", 0) for task in shard_tasks)
+    if totals.get("skippedCases", 0) != skipped or totals.get("excludedCases", 0) != excluded:
+        raise ValidationError("Pytest node skip or exclusion totals do not match its shard receipts.")
+    if receipt.get("selection") not in {"tests-only", "full"}:
         raise ValidationError("Receipt has an unexpected test selection.")
     if context.get("executor") != "github-actions" or context.get("nodeId") != NODE_ID:
         raise ValidationError("Receipt was not produced by the expected GitHub pytest node.")
@@ -50,13 +64,18 @@ def reconcile_receipts(receipts: list[dict[str, Any]], run_id: str, run_attempt:
         identity = ("commit", "tree", "sourceSha256", "inventorySha256", "inputDigests")
         if any(candidate.get(key) != current_candidate.get(key) for key in identity):
             raise ValidationError("Receipt and image job do not share the same source snapshot.")
-    count = receipt.get("inventoryCounts", {}).get(LANE_ID)
-    digest = receipt.get("inventoryLaneDigests", {}).get(LANE_ID)
-    if not isinstance(count, int) or count < 1 or not re.fullmatch(r"[a-f0-9]{64}", digest or ""):
-        raise ValidationError("Receipt is missing the pytest inventory.")
-    inventory = {item.get("lane"): item for item in task.get("inventory", [])}
-    if inventory.get(LANE_ID, {}).get("discoveredFiles") != count or inventory.get(LANE_ID, {}).get("inventorySha256") != digest:
-        raise ValidationError("Test task does not attest the discovered pytest inventory.")
+    inventory_counts = receipt.get("inventoryCounts", {})
+    inventory_digests = receipt.get("inventoryLaneDigests", {})
+    discovered_files = 0
+    for task_id, task in zip(TASK_IDS, shard_tasks, strict=True):
+        count = inventory_counts.get(task_id)
+        digest = inventory_digests.get(task_id)
+        if not isinstance(count, int) or count < 1 or not re.fullmatch(r"[a-f0-9]{64}", digest or ""):
+            raise ValidationError("Receipt is missing a pytest shard inventory.")
+        inventory = {item.get("lane"): item for item in task.get("inventory", [])}
+        if inventory.get(task_id, {}).get("discoveredFiles") != count or inventory.get(task_id, {}).get("inventorySha256") != digest:
+            raise ValidationError("Test shard does not attest its discovered pytest inventory.")
+        discovered_files += count
     return {
         "schemaVersion": 1,
         "repository": "romarrng",
@@ -65,8 +84,15 @@ def reconcile_receipts(receipts: list[dict[str, Any]], run_id: str, run_attempt:
         "sha": sha,
         "status": "passed",
         "activeCases": cases,
-        "skippedCases": task.get("skippedCases", 0),
-        "excludedCases": task.get("excludedCases", 0),
+        "skippedCases": skipped,
+        "excludedCases": excluded,
+        "inventoryFiles": discovered_files,
+        "shards": [{
+            "taskId": task_id,
+            "activeCases": task.get("activeCases"),
+            "skippedCases": task.get("skippedCases", 0),
+            "excludedCases": task.get("excludedCases", 0),
+        } for task_id, task in zip(TASK_IDS, shard_tasks, strict=True)],
         "nodeId": NODE_ID,
         "runner": runner,
         "completedAt": receipt.get("completedAt"),
