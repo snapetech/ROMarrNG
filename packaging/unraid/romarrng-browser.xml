@@ -8,14 +8,14 @@
   <Network>bridge</Network>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Icon>https://raw.githubusercontent.com/snapetech/ROMarrNG/main/packaging/unraid/icon.png?version=0.11.1-ng-badge</Icon>
+  <Icon>https://raw.githubusercontent.com/snapetech-org/ROMarrNG/main/packaging/unraid/icon.png?version=0.11.1-ng-badge</Icon>
   <WebUI>http://[IP]:[PORT:6868]/</WebUI>
   <Overview>Alternative ROMarrNG image with the Playwright client for browser-based downloads. Requires a separate, version-matched Playwright browser server. Use instead of the standard ROMarrNG container.</Overview>
   <Description>ROMarrNG Browser is the Debian image variant for the optional Headless Browser download client. It contains the Playwright Python client but no Chromium. Run a separate Playwright server and set Browser Host in Download Clients. This template shares the standard template's appdata and web port; do not run both containers at once.</Description>
-  <Support>https://github.com/snapetech/seerrng/issues</Support>
-  <Project>https://github.com/snapetech/ROMarrNG</Project>
-  <TemplateURL>https://raw.githubusercontent.com/snapetech/ROMarrNG/main/packaging/unraid/romarrng-browser.xml</TemplateURL>
-  <ReadMe>https://github.com/snapetech/ROMarrNG/blob/main/README.md#downloading-from-a-rom-site</ReadMe>
+  <Support>https://github.com/snapetech-org/seerrng/issues</Support>
+  <Project>https://github.com/snapetech-org/ROMarrNG</Project>
+  <TemplateURL>https://raw.githubusercontent.com/snapetech-org/ROMarrNG/main/packaging/unraid/romarrng-browser.xml</TemplateURL>
+  <ReadMe>https://github.com/snapetech-org/ROMarrNG/blob/main/README.md#downloading-from-a-rom-site</ReadMe>
   <Category>MediaApp:Other</Category>
   <ExtraSearchTerms>romarrng romarr browser playwright rom emulation game seerrng</ExtraSearchTerms>
   <Changes>Debian image variant with the matching Playwright client. Chromium runs in a separate browser server; direct download support is unchanged.</Changes>

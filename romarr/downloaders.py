@@ -2544,7 +2544,7 @@ def _safe_stem(name: str) -> str:
 #: be wrong the first time one of them changed. The URL is the part that
 #: matters to an operator reading their access log -- it tells them what
 #: visited and where to complain.
-SITE_USER_AGENT = "ROMarr (+https://github.com/snapetech/ROMarrNG)"
+SITE_USER_AGENT = "ROMarr (+https://github.com/snapetech-org/ROMarrNG)"
 
 #: Seconds between requests to one host, when robots.txt does not ask for
 #: more. Five is slower than any human browsing and that is the point: this

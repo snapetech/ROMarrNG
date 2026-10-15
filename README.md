@@ -36,7 +36,7 @@ request and catalog integration. Headless Browser downloads use the
 [ROMarrNG Browser template](packaging/unraid/romarrng-browser.xml) and a
 separate Playwright server; ordinary direct downloads need no extra container.
 For package or integration support, use the
-[SeerrNG issue tracker](https://github.com/snapetech/seerrng/issues).
+[SeerrNG issue tracker](https://github.com/snapetech-org/seerrng/issues).
 
 [ROM Hub](https://github.com/BlizzHacker/rom-hub) is ROMarr's plugin factory:
 it is where a source is written, run and sandboxed, and ROMarr picks the
@@ -45,9 +45,9 @@ patching ROMarr.
 
 If you run Radarr for films and Sonarr for TV, this is the missing one.
 
-[![CI](https://github.com/snapetech/ROMarrNG/actions/workflows/docker.yml/badge.svg)](https://github.com/snapetech/ROMarrNG/actions/workflows/docker.yml)
+[![CI](https://github.com/snapetech-org/ROMarrNG/actions/workflows/docker.yml/badge.svg)](https://github.com/snapetech-org/ROMarrNG/actions/workflows/docker.yml)
 [![licence MIT](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/snapetech/ROMarrNG)](https://github.com/snapetech/ROMarrNG/releases)
+[![Release](https://img.shields.io/github/v/release/snapetech-org/ROMarrNG)](https://github.com/snapetech-org/ROMarrNG/releases)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ed)](https://github.com/snapetech/ROMarrNG/pkgs/container/romarrng)
 [![platforms](https://img.shields.io/badge/arch-amd64%20%7C%20arm64%20%7C%20armv7-lightgrey)](#docker)
 
@@ -408,7 +408,7 @@ setting commented ships in the repo:
 
 ```bash
 mkdir -p /srv/romarr && cd /srv/romarr
-curl -O https://raw.githubusercontent.com/snapetech/ROMarrNG/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/snapetech-org/ROMarrNG/main/docker-compose.yml
 printf 'ROMARR_ROMS=/mnt/roms\nROMARR_DOWNLOADS=/mnt/downloads\n' > .env
 docker compose up -d
 ```
@@ -423,7 +423,7 @@ Settings page will say so; those two could only be wrong silently.
 ### Proxmox LXC
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/snapetech/ROMarrNG/main/proxmox/ct/romarr.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/snapetech-org/ROMarrNG/main/proxmox/ct/romarr.sh)"
 ```
 
 It waits for `/api/health` to answer before claiming success, refuses to deploy
@@ -436,14 +436,14 @@ start.
 ### Home Assistant
 
 Settings → Add-ons → Add-on Store → ⋮ → Repositories, add
-`https://github.com/snapetech/ROMarrNG`, install **ROMarr**. Options set on
+`https://github.com/snapetech-org/ROMarrNG`, install **ROMarr**. Options set on
 the add-on page become ROMarr's environment — see
 [homeassistant/romarr](homeassistant/romarr/README.md).
 
 ### From source
 
 ```bash
-git clone https://github.com/snapetech/ROMarrNG.git && cd ROMarrNG
+git clone https://github.com/snapetech-org/ROMarrNG.git && cd ROMarrNG
 pip install -r requirements.txt
 cp .env.example .env          # edit it
 set -a; . ./.env; set +a
@@ -1034,7 +1034,7 @@ same saved region policy, request IDs remain stable across retries, and each
 request keeps its own status and access to imported files even when requests
 share a transfer. The integration guide documents the API and lifecycle.
 
-ROMarrNG pull request [#15](https://github.com/snapetech/ROMarrNG/pull/15)
+ROMarrNG pull request [#15](https://github.com/snapetech-org/ROMarrNG/pull/15)
 merged this work into the fork on 2026-10-12. The changes are available here
 for upstream maintainers to review or take; this does not close or modify any
 issue in BlizzHacker/romarr, and no upstream pull requests were opened. The
@@ -1094,7 +1094,7 @@ download clients and library backends; a .NET owner for the contrib
 plugins; Home Assistant users for the add-on; DAT sources for platforms
 beyond No-Intro/Redump coverage; and issues — a report with a log line is
 usually fixed the same week. Open issues:
-[github.com/snapetech/ROMarrNG/issues](https://github.com/snapetech/ROMarrNG/issues).
+[github.com/snapetech-org/ROMarrNG/issues](https://github.com/snapetech-org/ROMarrNG/issues).
 
 ---
 
@@ -1105,7 +1105,7 @@ stack by MoveWeight.
 
 | | Project | Purpose |
 |---|---|---|
-| **Acquire** | [ROMarr](https://github.com/snapetech/ROMarrNG) | Request, find, grab, file |
+| **Acquire** | [ROMarr](https://github.com/snapetech-org/ROMarrNG) | Request, find, grab, file |
 | | [ROM Hub](https://github.com/BlizzHacker/rom-hub) | Plugin host — the sources ROMarr searches |
 | **Play** | [Desktop](https://github.com/BlizzHacker/RommForDesktop) · [Xbox](https://github.com/BlizzHacker/RommForXbox) · [Roku](https://github.com/BlizzHacker/RommForRoku) | Clients |
 | | [Stream Server](https://github.com/BlizzHacker/RommStreamServer) | Remote play |

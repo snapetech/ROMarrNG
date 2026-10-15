@@ -107,7 +107,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 LABEL org.opencontainers.image.title="ROMarrNG" \
       org.opencontainers.image.description="ROMarrNG adds a SeerrNG request and library contract to ROMarr" \
-      org.opencontainers.image.source="https://github.com/snapetech/ROMarrNG" \
+      org.opencontainers.image.source="https://github.com/snapetech-org/ROMarrNG" \
       org.opencontainers.image.licenses="MIT"
 
 ENTRYPOINT ["/entrypoint.sh"]

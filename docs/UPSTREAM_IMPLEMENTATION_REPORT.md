@@ -18,7 +18,7 @@ references were correct. Only upstream PR #47 and issue #48 were open at the
 snapshot; their broken-inline-JavaScript defect is fixed in ROMarrNG.
 
 The implementation was merged into the Snapetech fork as
-[ROMarrNG PR #15](https://github.com/snapetech/ROMarrNG/pull/15) on
+[ROMarrNG PR #15](https://github.com/snapetech-org/ROMarrNG/pull/15) on
 2026-10-12. Its code head is `be7c7f053f2c448005fccc859439f627f38d0046`;
 the fork's merge commit is `c55eeb6d2ca6bfc33725573692355d6451df6989`.
 This makes the changes available for upstream review. It did not close issues,
@@ -129,8 +129,8 @@ review, the Docker workflow's test and cross-platform validation jobs, the
 packaged acquisition jobs, and the release-note contract. **Queued is not
 passed.** The merge records the user's instruction and the local evidence; it
 does not turn those remote results green. Current results are visible on
-[PR #15](https://github.com/snapetech/ROMarrNG/pull/15) and its
-[Docker workflow run](https://github.com/snapetech/ROMarrNG/actions/runs/38310170478).
+[PR #15](https://github.com/snapetech-org/ROMarrNG/pull/15) and its
+[Docker workflow run](https://github.com/snapetech-org/ROMarrNG/actions/runs/38310170478).
 
 ## What remains to verify
 

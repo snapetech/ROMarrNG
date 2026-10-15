@@ -4683,7 +4683,7 @@ class ROMarr:
                 f"grabbed {grabbed_count}")
 
     #: Where release news comes from. Only ever read, never written to.
-    RELEASES_URL = "https://api.github.com/repos/snapetech/ROMarrNG/releases/latest"
+    RELEASES_URL = "https://api.github.com/repos/snapetech-org/ROMarrNG/releases/latest"
 
     def check_update(self) -> dict:
         """Ask github.com whether a newer ROMarr exists. Telling somebody is

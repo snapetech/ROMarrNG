@@ -61,7 +61,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 LABEL org.opencontainers.image.title="ROMarrNG (browser edition)" \
       org.opencontainers.image.description="ROMarrNG on Debian with the Playwright client for the Headless Browser download client" \
-      org.opencontainers.image.source="https://github.com/snapetech/ROMarrNG" \
+      org.opencontainers.image.source="https://github.com/snapetech-org/ROMarrNG" \
       org.opencontainers.image.licenses="MIT"
 
 ENTRYPOINT ["/entrypoint.sh"]

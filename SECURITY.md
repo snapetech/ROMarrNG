@@ -11,7 +11,7 @@ implying otherwise.
 ## Reporting a vulnerability
 
 Report privately through GitHub's
-[security advisories](https://github.com/snapetech/ROMarrNG/security/advisories/new).
+[security advisories](https://github.com/snapetech-org/ROMarrNG/security/advisories/new).
 Please do not open a public issue for anything exploitable.
 
 Include what you were running, what you did, and what happened. A proof of
@@ -354,7 +354,7 @@ Stated so nobody assumes otherwise:
   equivalent settings applied by their operator.
 - **Published container images carry signed provenance and SPDX SBOM
   attestations.** Verify an image with `gh attestation verify
-  oci://ghcr.io/snapetech/romarrng:latest -R snapetech/ROMarrNG`. Attestations
+  oci://ghcr.io/snapetech/romarrng:latest -R snapetech-org/ROMarrNG`. Attestations
   identify build origin and the SBOM; they do not prove the software is safe.
 - **DAT verification is an integrity check, not a security control.** It tells
   you a file matches a known-good dump. It is not malware scanning, and an

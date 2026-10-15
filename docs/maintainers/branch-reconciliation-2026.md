@@ -41,7 +41,7 @@ in `release-notes/2026-09-28-unraid-template-icon.md`.
 
 The repository has one configured remote, `origin`; there is no `upstream`
 Git remote. Docker publication is owned by this fork's workflow and image name,
-and the Proxmox installer fetches `snapetech/ROMarrNG`. The temporary local tag
+and the Proxmox installer fetches `snapetech-org/ROMarrNG`. The temporary local tag
 `upstream-v0.9.0` is not a release tag and is removed during cleanup; published
 `v0.3.0` through `v0.9.0` tags remain intact.
 

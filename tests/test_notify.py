@@ -247,4 +247,4 @@ def test_discord_supplies_the_documented_client_user_agent(sent):
     from romarr.app import VERSION
     Notifier([conn("discord")]).send(Message(ON_GRAB, "Test"))
     assert sent[0]["headers"]["User-Agent"] == (
-        f"DiscordBot (https://github.com/snapetech/ROMarrNG, {VERSION})")
+        f"DiscordBot (https://github.com/snapetech-org/ROMarrNG, {VERSION})")

@@ -118,7 +118,7 @@ def _discord(cfg: dict, message: Message) -> bool:
     if cfg.get("username"):
         payload["username"] = cfg["username"]
     return _json_post(cfg.get("url", ""), payload, headers={
-        "User-Agent": f"DiscordBot (https://github.com/snapetech/ROMarrNG, {VERSION})",
+        "User-Agent": f"DiscordBot (https://github.com/snapetech-org/ROMarrNG, {VERSION})",
     })
 
 

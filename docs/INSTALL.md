@@ -100,7 +100,7 @@ stay on their mounted volumes.
 
 ```bash
 mkdir -p /srv/romarr && cd /srv/romarr
-curl -O https://raw.githubusercontent.com/snapetech/ROMarrNG/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/snapetech-org/ROMarrNG/main/docker-compose.yml
 ```
 
 Create a `.env` beside it with your two host paths:
@@ -237,7 +237,7 @@ board is worth more than another CI build.
 On a Proxmox VE host, as root:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/snapetech/ROMarrNG/main/proxmox/ct/romarr.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/snapetech-org/ROMarrNG/main/proxmox/ct/romarr.sh)"
 ```
 
 It creates an unprivileged Debian 13 container, installs ROMarr into
@@ -264,7 +264,7 @@ CTID=123 DISK=8 RAM=1024 ROM_PATH=/mnt/roms \
 | `UNPRIVILEGED` | `1` | |
 | `ROM_PATH` | `/mnt/roms` | Also added to the unit's `ReadWritePaths` |
 | `APP_PORT` | `6868` | |
-| `REPO` | `snapetech/ROMarrNG` | Source repository |
+| `REPO` | `snapetech-org/ROMarrNG` | Source repository |
 
 The script is deliberately self-contained. It used to source community-scripts'
 `build.func`, which then fetched `install/<app>.sh` from *their* repository —
@@ -309,7 +309,7 @@ with `root_squash`, that is the thing to know.
 ## Home Assistant
 
 *Settings → Add-ons → Add-on Store → ⋮ → Repositories*, add
-`https://github.com/snapetech/ROMarrNG`, install **ROMarr**.
+`https://github.com/snapetech-org/ROMarrNG`, install **ROMarr**.
 
 It runs the same image Docker users run — ROMarr reads Home Assistant's
 `/data/options.json` natively, so there is no add-on-specific build and no
@@ -334,7 +334,7 @@ plugin scratch directory. The supplied Docker Compose file mounts `/tmp` as a
 256 MiB tmpfs; elsewhere ROMarr can use a tmpfs such as `/dev/shm`.
 
 ```bash
-git clone https://github.com/snapetech/ROMarrNG.git && cd ROMarrNG
+git clone https://github.com/snapetech-org/ROMarrNG.git && cd ROMarrNG
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env          # edit it
@@ -745,7 +745,7 @@ need to know what changed; pin a `sha-` tag if you would rather decide.
 ### Proxmox LXC
 
 ```bash
-pct exec <ctid> -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/snapetech/ROMarrNG/main/proxmox/ct/update.sh)"
+pct exec <ctid> -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/snapetech-org/ROMarrNG/main/proxmox/ct/update.sh)"
 ```
 
 or the same `bash -c "$(curl ...)"` from inside the container.

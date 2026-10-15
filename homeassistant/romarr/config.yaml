@@ -7,7 +7,7 @@ name: ROMarr
 version: "0.10.0"
 slug: romarr
 description: The *arr for games — request a title, ROMarr searches your indexers and files the ROM into your library.
-url: https://github.com/snapetech/ROMarrNG
+url: https://github.com/snapetech-org/ROMarrNG
 arch:
   - amd64
   - aarch64

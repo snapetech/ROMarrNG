@@ -142,4 +142,4 @@ one base v0, changed the form after preview, and requested the original previewe
 set successfully. The disposable browser and fixture server were stopped afterward.
 Release-note metadata, all 48 unique inventory entries, and `git diff --check` passed.
 The GitHub-hosted PR checks were still queued when the change merged; see the
-implementation report and live [PR #15 check status](https://github.com/snapetech/ROMarrNG/pull/15).
+implementation report and live [PR #15 check status](https://github.com/snapetech-org/ROMarrNG/pull/15).
